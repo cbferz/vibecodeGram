@@ -1,21 +1,31 @@
-name: Android CI
+name: VibeCodeGram Android CI
 
 on:
   push:
-    branches: [ main, "feature/**" ]
-  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '**/*.gradle'
+      - '**/*.gradle.kts'
+      - 'gradle.properties'
+      - 'settings.gradle.kts'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
+
+concurrency:
+  group: vibecodegram-android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: android-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build:
+  android:
+    name: Build VibeCodeGram APK
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,20 +34,80 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Set up Gradle with dependency caching
+        uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.10.2"
+          gradle-version: '8.10.2'
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install only missing Android SDK components
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SDKMANAGER="$(command -v sdkmanager)"
+          test -n "$SDKMANAGER"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+
+          packages=(
+            'platform-tools'
+            'platforms;android-35'
+            'build-tools;35.0.0'
+          )
+          missing=()
+          for package in "${packages[@]}"; do
+            case "$package" in
+              platform-tools) target="$SDK_ROOT/platform-tools" ;;
+              platforms\;android-35) target="$SDK_ROOT/platforms/android-35" ;;
+              build-tools\;35.0.0) target="$SDK_ROOT/build-tools/35.0.0" ;;
+              *) echo "Unknown SDK component: $package" >&2; exit 1 ;;
+            esac
+            [[ -d "$target" ]] || missing+=("$package")
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            yes | "$SDKMANAGER" --licenses >/dev/null || true
+            "$SDKMANAGER" --install "${missing[@]}"
+          else
+            echo "All required Android SDK components are already installed."
+          fi
 
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        shell: bash
+        run: gradle --no-daemon --console=plain :app:assembleDebug
 
-      - name: Upload debug APK
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APK='app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+
+      - name: Write build metadata
+        shell: bash
+        run: |
+          {
+            echo "project=VibeCodeGram"
+            echo "application_id=com.vibecodegram.debug"
+            echo "commit=$GITHUB_SHA"
+            echo "branch=$GITHUB_REF_NAME"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_number=$GITHUB_RUN_NUMBER"
+            echo "variant=debug"
+          } > app/build/outputs/apk/debug/build-info.txt
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vibecodegram-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: vibecodegram-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/build-info.txt
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
