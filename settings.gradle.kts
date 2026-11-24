@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VibeCodeGram"
+rootProject.name = "vibecodeGram"
 include(":app")

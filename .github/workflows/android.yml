@@ -1,4 +1,4 @@
-name: VibeCodeGram Android CI
+name: vibecodeGram Android CI
 
 on:
   push:
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   android:
-    name: Build VibeCodeGram APK
+    name: Build vibecodeGram APK
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -39,7 +39,7 @@ jobs:
       - name: Set up Gradle with dependency caching
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.11.1'
 
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
@@ -55,15 +55,15 @@ jobs:
 
           packages=(
             'platform-tools'
-            'platforms;android-35'
-            'build-tools;35.0.0'
+            'platforms;android-36'
+            'build-tools;36.0.0'
           )
           missing=()
           for package in "${packages[@]}"; do
             case "$package" in
               platform-tools) target="$SDK_ROOT/platform-tools" ;;
-              platforms\;android-35) target="$SDK_ROOT/platforms/android-35" ;;
-              build-tools\;35.0.0) target="$SDK_ROOT/build-tools/35.0.0" ;;
+              platforms\;android-36) target="$SDK_ROOT/platforms/android-36" ;;
+              build-tools\;36.0.0) target="$SDK_ROOT/build-tools/36.0.0" ;;
               *) echo "Unknown SDK component: $package" >&2; exit 1 ;;
             esac
             [[ -d "$target" ]] || missing+=("$package")
@@ -86,28 +86,13 @@ jobs:
           set -Eeuo pipefail
           APK='app/build/outputs/apk/debug/app-debug.apk'
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
-
-      - name: Write build metadata
-        shell: bash
-        run: |
-          {
-            echo "project=VibeCodeGram"
-            echo "application_id=com.vibecodegram.debug"
-            echo "commit=$GITHUB_SHA"
-            echo "branch=$GITHUB_REF_NAME"
-            echo "run_id=$GITHUB_RUN_ID"
-            echo "run_number=$GITHUB_RUN_NUMBER"
-            echo "variant=debug"
-          } > app/build/outputs/apk/debug/build-info.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: vibecodegram-apk-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/build-info.txt
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
