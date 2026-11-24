@@ -1,35 +1,53 @@
 # VibeCodeGram
 
-VibeCodeGram is an independent Android application. It is not a KentGram fork and does not reuse KentGram code, assets, modules, or design.
+VibeCodeGram is an independent social messenger: its Android app talks only to the VibeCodeGram backend. It does **not** connect to Telegram and does not require Telegram API ID or API Hash.
 
-## Product direction
+## Architecture
 
-- Telegram-inspired messaging capabilities, implemented as an independent client.
-- Power-user customization and extensibility informed by publicly documented exteraGram feature concepts.
-- Instagram-inspired social surfaces: profiles, media feed, stories, reactions, and discovery.
-- A native Android translucent "Liquid Glass" visual language, adapted to Android accessibility and performance.
+- Android: Kotlin, Jetpack Compose, Material 3.
+- Backend: Go 1.23, Chi HTTP router, PostgreSQL, JWT sessions, bcrypt password hashing.
+- Realtime: authenticated WebSocket endpoint.
+- Deployment: Docker Compose; the operator deploys the stack on their own VPS.
 
-The named products are references for feature research only. No Instagram source code, private APIs, trademarks, or proprietary assets are included.
+Telegram Android and exteraGram are feature-research references only. Instagram is a product-pattern reference only. This repository does not copy their source code, private APIs, trademarks, or proprietary assets. No KentGram code, modules, resources, or design are used.
 
-## Android project
+## Backend quick start
+
+1. Copy `.env.example` to `.env`.
+2. Set a long random `JWT_SECRET` and change the PostgreSQL password.
+3. Run `docker compose up -d --build`.
+4. Check `curl http://YOUR_HOST:8080/healthz`.
+
+The API listens on port 8080 inside the compose network. PostgreSQL is not published to the host by default. Put a TLS reverse proxy (for example Caddy or Nginx) in front of the API before exposing it publicly. Keep `.env` private.
+
+### API v1
+
+- `POST /v1/auth/register` — create account (`username`, `password`, optional `display_name`).
+- `POST /v1/auth/login` — issue bearer token.
+- `GET /v1/me` — current account.
+- `GET /v1/conversations` — list memberships.
+- `POST /v1/conversations` — create a direct or group conversation.
+- `GET /v1/conversations/{id}/messages?limit=50&before=ID` — message history.
+- `POST /v1/conversations/{id}/messages` — send a text message.
+- `GET /v1/ws?token=JWT` — authenticated realtime stream. Use TLS in production; query tokens may be visible in proxy logs, so configure log redaction.
+
+All conversation and message queries are scoped to the authenticated user. Passwords are stored as bcrypt hashes, never plaintext.
+
+## Android
 
 - Application ID: `com.vibecodegram`
-- Kotlin + Jetpack Compose
-- Minimum SDK: 26
-- Compile/target SDK: 35
+- Minimum SDK 26; compile/target SDK 35.
+- Debug builds use `com.vibecodegram.debug` so they can coexist with a release install.
 
-## Build
+The Android shell is being connected to the API in subsequent increments. A green backend health check does not mean every social or messaging screen is already implemented.
 
-The GitHub Actions workflow builds a debug APK on pushes and pull requests. A distributable release requires a persistent user-owned signing keystore and credentials configured as repository secrets. Never generate a new signing key for every release.
+## CI and releases
 
-## Security and API credentials
+GitHub Actions builds a debug APK. A distributable release requires one persistent signing keystore and credentials stored as repository secrets. Never rotate the signing key between updates; increment `versionCode` for each release.
 
-Use VibeCodeGram's own Telegram API ID/hash and any service credentials. Do not commit secrets, production tokens, signing keys, or private configuration files.
+## License research
 
-## Source references and licensing
+- Telegram Android: GPL-2.0
+- exteraGram: GPL-3.0
 
-Feature research references:
-- https://github.com/TelegramOrg/Telegram-Android
-- https://github.com/exteraSquad/exteraGram
-
-This initial project scaffold contains independently authored code and does not copy source files from those repositories. Their licenses differ (Telegram Android: GPL-2.0; exteraGram: GPL-3.0). Any future source-code reuse must be reviewed file-by-file, with compatible licensing, notices, and corresponding-source obligations satisfied before distribution.
+This project currently uses independently authored implementation code. Any future source reuse requires a separate license and attribution review.
