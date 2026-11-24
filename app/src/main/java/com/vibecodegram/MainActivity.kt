@@ -51,6 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -97,6 +98,7 @@ private fun VibeCodeGramApp() {
                     items = items,
                     selectedIndex = selected,
                     onSelected = { selected = it },
+                    backdrop = backdrop,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 12.dp)
@@ -190,9 +192,9 @@ private fun LiquidGlassNavigationBar(
     items: List<NavDestination>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
+    backdrop: Backdrop,
     modifier: Modifier = Modifier
 ) {
-    val backdrop = rememberLayerBackdrop()
     val indicator = remember { Animatable(selectedIndex.toFloat()) }
     val scope = rememberCoroutineScope()
 
@@ -242,29 +244,7 @@ private fun LiquidGlassNavigationBar(
                             drawRect(Brush.verticalGradient(listOf(Color.White.copy(.16f), Color.White.copy(.025f))))
                         }
                     )
-                    .pointerInput(items.size, tabWidthPx) {
-                        var start = indicator.value
-                        detectDragGestures(
-                            onDragStart = { start = indicator.value },
-                            onDragEnd = {
-                                val target = indicator.value.roundToInt().coerceIn(items.indices)
-                                scope.launch {
-                                    indicator.animateTo(target.toFloat(), spring(dampingRatio = .68f, stiffness = 420f))
-                                    onSelected(target)
-                                }
-                            },
-                            onDragCancel = {
-                                scope.launch {
-                                    indicator.animateTo(selectedIndex.toFloat(), spring())
-                                }
-                            },
-                            onDrag = { change, amount ->
-                                change.consume()
-                                val next = (indicator.value + amount.x / tabWidthPx).coerceIn(0f, items.lastIndex.toFloat())
-                                scope.launch { indicator.snapTo(next) }
-                            }
-                        )
-                    }
+
             )
 
             Row(
@@ -277,6 +257,26 @@ private fun LiquidGlassNavigationBar(
                             .weight(1f)
                             .fillMaxHeight()
                             .clip(Capsule())
+                            .pointerInput(index, tabWidthPx) {
+                                detectDragGestures(
+                                    onDragEnd = {
+                                        val target = indicator.value.roundToInt().coerceIn(items.indices)
+                                        scope.launch {
+                                            indicator.animateTo(target.toFloat(), spring(dampingRatio = .68f, stiffness = 420f))
+                                            onSelected(target)
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        scope.launch { indicator.animateTo(selectedIndex.toFloat(), spring()) }
+                                    },
+                                    onDrag = { change, amount ->
+                                        change.consume()
+                                        val next = (indicator.value + amount.x / tabWidthPx)
+                                            .coerceIn(0f, items.lastIndex.toFloat())
+                                        scope.launch { indicator.snapTo(next) }
+                                    }
+                                )
+                            }
                             .clickable { onSelected(index) },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
