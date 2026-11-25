@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23.x"
-      - name: Format Go sources
+      - name: Download Go modules\n        working-directory: server\n        run: go mod download\n      - name: Format Go sources
         working-directory: server
         run: gofmt -w *.go
       - name: Test
