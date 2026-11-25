@@ -25,6 +25,13 @@ The API listens on port 8080 inside the compose network. PostgreSQL is not publi
 - `POST /v1/auth/register` — create account (`username`, `password`, optional `display_name`).
 - `POST /v1/auth/login` — issue bearer token.
 - `GET /v1/me` — current account.
+- `GET /v1/me/badges` — verified badges for the authenticated account.
+- `GET /v1/devices/accounts?device_id=...` — accounts registered on this app installation.
+- `POST /v1/devices/accounts` — register the currently authenticated account on a device (`device_id`).
+- `DELETE /v1/devices/accounts/{accountID}?device_id=...` — remove a saved account from that installation.
+- `POST /v1/admin/users/{id}/badges` — staff badge assignment (`{"badge":"team"}`).
+- `DELETE /v1/admin/users/{id}/badges/{badge}` — revoke a staff badge.
+- `PUT /internal/subscriptions/{id}` — subscription-provider webhook; requires `X-Subscription-Secret`.
 - `GET /v1/conversations` — list memberships.
 - `POST /v1/conversations` — create a direct or group conversation.
 - `GET /v1/conversations/{id}/messages?limit=50&before=ID` — message history.
@@ -87,3 +94,12 @@ Example tool body:
 ```
 
 AI is unavailable until `HF_TOKEN` and `HF_AI_MODELS` are configured on the deployed server.
+
+
+## Accounts and verified badges
+
+Migration `002_accounts_badges.sql` adds device-account registration, premium tiers, staff badges and an audit trail. A normal account is limited to 3 saved accounts per installation; an account with an active Premium tier may register up to 5. The Android client must use a stable random installation ID as `device_id` and keep each account's token separately in secure local storage.
+
+Set `FOUNDER_USER_ID` to the database user ID of the project owner. On startup, the API assigns that account the Founder badge. Founder and Developer can manage staff badges; Co-Developers can grant the Team badge. Premium badges cannot be assigned manually: the subscription webhook updates `users.premium_tier` and assigns the corresponding badges.
+
+The subscription webhook accepts `none`, `premium`, `premium_plus` or `premium_elite` as `tier`. Configure a random `SUBSCRIPTION_WEBHOOK_SECRET` of at least 32 characters and send it in the `X-Subscription-Secret` header. Do not expose this secret in the Android app. The webhook is an integration point, not a payment processor; a billing provider still needs to be connected.
