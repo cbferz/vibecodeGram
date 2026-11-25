@@ -1,6 +1,7 @@
 package com.vibecodegram
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -185,7 +186,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
-                        0 -> FeedScreen(theme, compact, padding.calculateBottomPadding())
+                        0 -> FeedScreen(theme, compact, padding.calculateBottomPadding(), prefs)
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = padding.calculateBottomPadding())
                         2 -> VideosScreen(theme, padding.calculateBottomPadding())
                         3 -> ExploreScreen(theme, search, { search = it }, padding.calculateBottomPadding())
@@ -245,14 +246,25 @@ private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, de
 }
 
 @Composable
-private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.compose.ui.unit.Dp) {
+private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.compose.ui.unit.Dp, prefs: android.content.SharedPreferences) {
+    val context = LocalContext.current
     var selectedFilter by remember { mutableStateOf("Для тебя") }
-    var liked by remember { mutableStateOf(setOf<Int>()) }
+    var liked by remember { mutableStateOf(prefs.getStringSet("feed_liked", emptySet())?.toSet() ?: emptySet()) }
+    var saved by remember { mutableStateOf(prefs.getStringSet("feed_saved", emptySet())?.toSet() ?: emptySet()) }
+    var hidden by remember { mutableStateOf(prefs.getStringSet("feed_hidden", emptySet())?.toSet() ?: emptySet()) }
     val posts = listOf(
         Post("Алекс", "@alexwave", "2 мин", "Иногда лучший апдейт — это просто сделать интерфейс таким, каким давно хотел его видеть.", "Дизайн", 128),
         Post("Mira", "@mira.jpg", "18 мин", "Собрала новый плейлист для ночных поездок. Какой трек у вас сейчас на повторе?", "Музыка", 86),
         Post("vibecodeGram", "@vibecodegram", "1 ч", "Здесь будет твоя лента: публикации, истории, реакции и обсуждения. Настраивай внешний вид под себя.", "Обновления", 54)
     )
+    val visiblePosts = posts.filterNot { it.handle in hidden }.filter { post ->
+        when (selectedFilter) {
+            "Подписки" -> post.author == "Алекс" || post.author == "Mira"
+            "Популярное" -> post.likes >= 80
+            "Медиа" -> false
+            else -> true
+        }
+    }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf("Для тебя", "Подписки", "Популярное", "Медиа").forEach { label ->
             FilterChip(selected = selectedFilter == label, onClick = { selectedFilter = label }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
@@ -267,8 +279,17 @@ private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.c
                 Text("＋", color = theme.accent, fontSize = 24.sp)
             }
         } }
-        items(posts) { post ->
-            val index = posts.indexOf(post)
+        if (visiblePosts.isEmpty()) {
+            item {
+                Text(
+                    if (selectedFilter == "Медиа") "Пока нет публикаций с медиа" else "Здесь пока пусто",
+                    color = theme.secondary,
+                    modifier = Modifier.fillMaxWidth().padding(28.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        }
+        items(visiblePosts, key = { it.handle }) { post ->
             var menu by remember { mutableStateOf(false) }
             GlassCard(theme, compact, Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true })) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -281,9 +302,28 @@ private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.c
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreHoriz, "Ещё", tint = theme.secondary) }
                         GlassPopupMenu(expanded = menu, onDismissRequest = { menu = false }, theme = theme) {
-                            GlassMenuItem(Icons.Default.BookmarkBorder, "Сохранить", theme) { menu = false }
-                            GlassMenuItem(Icons.Default.VisibilityOff, "Скрыть публикацию", theme) { menu = false }
-                            GlassMenuItem(Icons.Default.Share, "Поделиться", theme) { menu = false }
+                            GlassMenuItem(
+                                if (post.handle in saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                if (post.handle in saved) "Убрать из сохранённого" else "Сохранить",
+                                theme
+                            ) {
+                                saved = if (post.handle in saved) saved - post.handle else saved + post.handle
+                                prefs.edit().putStringSet("feed_saved", saved).apply()
+                                menu = false
+                            }
+                            GlassMenuItem(Icons.Default.VisibilityOff, "Скрыть публикацию", theme) {
+                                hidden = hidden + post.handle
+                                prefs.edit().putStringSet("feed_hidden", hidden).apply()
+                                menu = false
+                            }
+                            GlassMenuItem(Icons.Default.Share, "Поделиться", theme) {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, "${post.author} (${post.handle})\n\n${post.text}")
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Поделиться публикацией"))
+                                menu = false
+                            }
                         }
                     }
                 }
@@ -295,10 +335,13 @@ private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.c
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { liked = if (index in liked) liked - index else liked + index }) {
-                        Icon(if (index in liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (index in liked) Color(0xFFFF718B) else theme.secondary, modifier = Modifier.size(17.dp))
+                    TextButton(onClick = {
+                        liked = if (post.handle in liked) liked - post.handle else liked + post.handle
+                        prefs.edit().putStringSet("feed_liked", liked).apply()
+                    }) {
+                        Icon(if (post.handle in liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (post.handle in liked) Color(0xFFFF718B) else theme.secondary, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text((post.likes + if (index in liked) 1 else 0).toString(), color = theme.secondary)
+                        Text((post.likes + if (post.handle in liked) 1 else 0).toString(), color = theme.secondary)
                     }
                     TextButton(onClick = {}) { Icon(Icons.Default.ChatBubbleOutline, null, tint = theme.secondary, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Ответить", color = theme.secondary) }
                     Spacer(Modifier.weight(1f))
