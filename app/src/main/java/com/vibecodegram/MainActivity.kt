@@ -125,6 +125,7 @@ private val accents = listOf(Color(0xFFE6EAF2), Color(0xFF69C9FF), Color(0xFFC5A
 private data class Destination(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String)
 private data class Chat(val name: String, val message: String, val time: String, val unread: Int, val online: Boolean, val group: Boolean = false)
 private data class Post(val author: String, val handle: String, val time: String, val text: String, val tag: String, val likes: Int)
+private data class LocalChatMessage(val id: Long, val text: String, val time: String, val outgoing: Boolean)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -148,6 +149,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     var editor by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("Все") }
+    var openedChat by remember { mutableStateOf<Chat?>(null) }
     val base = palettes[paletteIndex]
     val theme = base.copy(accent = if (accentIndex >= 0) accents[accentIndex] else base.accent)
     val backdrop = rememberLayerBackdrop()
@@ -175,7 +177,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
                         0 -> FeedScreen(theme, compact)
-                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact)
+                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it })
                         2 -> VideosScreen(theme)
                         3 -> ExploreScreen(theme, search, { search = it })
                         else -> ProfileScreen(
@@ -208,6 +210,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                 onClose = { editor = false }
             )
         }
+        openedChat?.let { ChatRoomDialog(it, theme, prefs) { openedChat = null } }
     }
 }
 
@@ -297,7 +300,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean) {
 }
 
 @Composable
-private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean) {
+private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean, onOpenChat: (Chat) -> Unit) {
     val chats = listOf(
         Chat("Лера", "Отправила фотографию", "21:14", 2, true),
         Chat("Разработка vibecodeGram", "Алекс: залил новый интерфейс", "20:58", 5, true, true),
@@ -314,7 +317,7 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
     LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 9.dp)) {
         items(chats.filter { it.name.contains(search, true) || it.message.contains(search, true) }.filter { folder == "Все" || folder == "Непрочитанные" && it.unread > 0 || folder == "Группы" && it.group || folder == "Личные" && !it.group }) { chat ->
             var menu by remember { mutableStateOf(false) }
-            GlassCard(theme, compact, Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true })) {
+            GlassCard(theme, compact, Modifier.combinedClickable(onClick = { onOpenChat(chat) }, onLongClick = { menu = true })) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         Avatar(chat.name.take(1), theme.accent, 48)
@@ -338,6 +341,69 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun ChatRoomDialog(chat: Chat, theme: Palette, prefs: android.content.SharedPreferences, onClose: () -> Unit) {
+    val key = "local_messages_" + chat.name.hashCode()
+    val messages = remember(chat.name) {
+        mutableStateListOf<LocalChatMessage>().apply {
+            runCatching {
+                val array = org.json.JSONArray(prefs.getString(key, "[]"))
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    add(LocalChatMessage(item.optLong("id", i.toLong()), item.optString("text"), item.optString("time"), item.optBoolean("outgoing")))
+                }
+            }
+            if (isEmpty()) add(LocalChatMessage(1L, chat.message, chat.time, false))
+        }
+    }
+    var draft by remember(chat.name) { mutableStateOf("") }
+    fun saveMessages() {
+        val array = org.json.JSONArray()
+        messages.forEach { m -> array.put(org.json.JSONObject().put("id",m.id).put("text",m.text).put("time",m.time).put("outgoing",m.outgoing)) }
+        prefs.edit().putString(key,array.toString()).apply()
+    }
+    Dialog(onDismissRequest = onClose) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f), shape = RoundedCornerShape(24.dp), color = theme.background) {
+            Column(Modifier.fillMaxSize().padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(chat.name.take(1),theme.accent,42)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(chat.name,color=Color.White,fontWeight=FontWeight.Bold)
+                        Text(if(chat.online) "в сети" else "был(а) недавно",color=theme.secondary,fontSize=11.sp)
+                    }
+                    IconButton(onClick=onClose) { Icon(Icons.Default.Close,"Закрыть",tint=theme.secondary) }
+                }
+                Divider(color=Color.White.copy(alpha=.1f))
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    items(messages,key={it.id}) { m ->
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=if(m.outgoing) Arrangement.End else Arrangement.Start) {
+                            Column(Modifier.widthIn(max=280.dp).clip(RoundedCornerShape(16.dp)).background(if(m.outgoing) theme.accent.copy(alpha=.2f) else theme.surface).padding(12.dp)) {
+                                Text(m.text,color=Color.White,fontSize=14.sp,lineHeight=19.sp)
+                                Text(m.time,color=theme.secondary,fontSize=9.sp,modifier=Modifier.align(Alignment.End))
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    OutlinedTextField(value=draft,onValueChange={draft=it},modifier=Modifier.weight(1f),placeholder={Text("Сообщение…")},shape=RoundedCornerShape(18.dp),maxLines=4)
+                    IconButton(onClick={
+                        val value=draft.trim()
+                        if(value.isNotEmpty()) {
+                            val now=java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date())
+                            messages.add(LocalChatMessage((messages.maxOfOrNull{it.id} ?: 0L)+1L,value,now,true))
+                            draft=""
+                            saveMessages()
+                        }
+                    },enabled=draft.isNotBlank()) { Icon(Icons.Default.Send,"Отправить",tint=theme.accent) }
+                }
+                Text("Демо-режим: переписка хранится локально на устройстве и не отправляется собеседнику.",color=theme.secondary,fontSize=9.sp,modifier=Modifier.padding(top=6.dp))
             }
         }
     }
