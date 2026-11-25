@@ -51,3 +51,39 @@ GitHub Actions builds a debug APK. A distributable release requires one persiste
 - exteraGram: GPL-3.0
 
 This project currently uses independently authored implementation code. Any future source reuse requires a separate license and attribution review.
+
+## Hugging Face AI backend
+
+The Go API exposes authenticated AI routes under `/v1`:
+
+- `GET /v1/ai/models` — Hugging Face chat model catalogue, filtered by the server allowlist.
+- `POST /v1/ai/chat` — assistant chat with a short conversation history.
+- `POST /v1/ai/tools/translate` — translation (`target_language`).
+- `POST /v1/ai/tools/summarize` — text summary.
+- `POST /v1/ai/tools/rewrite` — rewrite while preserving meaning.
+- `POST /v1/ai/tools/grammar` — spelling and grammar correction.
+- `POST /v1/ai/tools/post` — social post drafting.
+- `POST /v1/ai/tools/smart_reply` — three suggested replies (nothing is sent automatically).
+- `POST /v1/ai/tools/context_search` — rank passages in supplied context against a query.
+
+All AI routes require the normal user Bearer token. The Hugging Face token stays on the server and must never be placed in the Android app.
+
+Add these values to the server's `.env` (copy from `.env.example`):
+
+```dotenv
+HF_TOKEN=hf_your_fine_grained_token
+HF_AI_MODELS=openai/gpt-oss-20b:fastest,deepseek-ai/DeepSeek-R1:fastest
+```
+
+The token needs permission to make calls to Inference Providers. Configure only models available to that Hugging Face account. Hugging Face performs provider routing for each configured model. The API tries the next configured model only for transient upstream outages (502/503/504); it does not rotate models to bypass quota, billing, 401/403 or 429 limits. The app API also applies a per-user request limit.
+
+Example tool body:
+
+```json
+{
+  "text": "Text to translate",
+  "target_language": "Russian"
+}
+```
+
+AI is unavailable until `HF_TOKEN` and `HF_AI_MODELS` are configured on the deployed server.
