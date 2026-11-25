@@ -103,3 +103,20 @@ func (a *App) revokeBadge(w http.ResponseWriter,r *http.Request) {
  if err=tx.Commit(); err!=nil { fail(w,500,"could not revoke badge"); return }
  writeJSON(w,200,map[string]any{"revoked":true,"user_id":target,"badge":code})
 }
+
+func (a *App) subscriptionWebhook(w http.ResponseWriter,r *http.Request) {
+ secret:=strings.TrimSpace(os.Getenv("SUBSCRIPTION_WEBHOOK_SECRET"))
+ if len(secret)<32 || r.Header.Get("X-Subscription-Secret")!=secret { fail(w,http.StatusUnauthorized,"invalid webhook credentials"); return }
+ target,err:=strconv.ParseInt(chi.URLParam(r,"id"),10,64); if err!=nil||target<1 { fail(w,400,"invalid user id"); return }
+ var in struct { Tier string `json:"tier"` }
+ if decode(r,&in)!=nil { fail(w,400,"invalid request"); return }
+ in.Tier=strings.TrimSpace(in.Tier)
+ if in.Tier!="none"&&in.Tier!="premium"&&in.Tier!="premium_plus"&&in.Tier!="premium_elite" { fail(w,400,"unsupported premium tier"); return }
+ tx,err:=a.db.BeginTx(r.Context(),nil); if err!=nil { fail(w,500,"database error"); return }; defer tx.Rollback()
+ premium:=in.Tier!="none"
+ if _,err=tx.ExecContext(r.Context(),"UPDATE users SET is_premium=$1,premium_tier=$2 WHERE id=$3",premium,in.Tier,target); err!=nil { fail(w,404,"user not found"); return }
+ if _,err=tx.ExecContext(r.Context(),"DELETE FROM user_badges WHERE user_id=$1 AND badge_code IN ('premium','premium_plus','premium_elite')",target); err!=nil { fail(w,500,"could not update premium badges"); return }
+ if premium { if _,err=tx.ExecContext(r.Context(),"INSERT INTO user_badges(user_id,badge_code) VALUES($1,'premium'),($1,$2)",target,in.Tier); err!=nil { fail(w,500,"could not assign premium badges"); return } }
+ if err=tx.Commit(); err!=nil { fail(w,500,"could not update subscription"); return }
+ writeJSON(w,200,map[string]any{"updated":true,"user_id":target,"tier":in.Tier,"is_premium":premium})
+}
