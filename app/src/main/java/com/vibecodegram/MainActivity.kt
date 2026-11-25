@@ -129,12 +129,12 @@ private data class Post(val author: String, val handle: String, val time: String
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { VibeCodeGramApp(getSharedPreferences("appearance", Context.MODE_PRIVATE)) }
+        setContent { vibecodeGramApp(getSharedPreferences("appearance", Context.MODE_PRIVATE)) }
     }
 }
 
 @Composable
-private fun VibeCodeGramApp(prefs: android.content.SharedPreferences) {
+private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     var page by remember { mutableIntStateOf(0) }
     var paletteIndex by remember { mutableIntStateOf(prefs.getInt("palette", 0).coerceIn(palettes.indices)) }
     var accentIndex by remember { mutableIntStateOf(prefs.getInt("accent", -1)) }
