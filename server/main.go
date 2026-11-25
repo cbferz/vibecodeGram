@@ -44,6 +44,7 @@ func main() {
  migrationFiles,err:=migrationFS.ReadDir("migrations"); if err!=nil { log.Fatal(err) }
  for _,file:=range migrationFiles { if file.IsDir() || !strings.HasSuffix(file.Name(),".sql") { continue }; migration,readErr:=migrationFS.ReadFile("migrations/"+file.Name()); if readErr!=nil { log.Fatal(readErr) }; if _,err=db.ExecContext(ctx,string(migration)); err!=nil { log.Fatalf("migration %s: %v",file.Name(),err) } }
  a:=&App{db:db,jwtSecret:[]byte(secret)}
+ if founderRaw:=strings.TrimSpace(os.Getenv("FOUNDER_USER_ID")); founderRaw!="" { if founderID,parseErr:=strconv.ParseInt(founderRaw,10,64); parseErr==nil && founderID>0 { if _,seedErr:=db.ExecContext(ctx,"INSERT INTO user_badges(user_id,badge_code) SELECT id,'founder' FROM users WHERE id=$1 ON CONFLICT DO NOTHING",founderID); seedErr!=nil { log.Fatal("founder badge bootstrap: ",seedErr) } } }
  r:=chi.NewRouter(); r.Use(middleware.RequestID,middleware.RealIP,middleware.Recoverer,middleware.Timeout(20*time.Second))
  r.Get("/healthz",func(w http.ResponseWriter,r *http.Request){ if err:=db.PingContext(r.Context()); err!=nil { fail(w,503,"database unavailable"); return }; writeJSON(w,200,map[string]string{"status":"ok","service":"vibecodegram-api"}) })
  r.Route("/v1",func(v chi.Router){
