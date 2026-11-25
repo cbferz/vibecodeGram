@@ -64,7 +64,7 @@ func aiModels() []string {
 	return out
 }
 
-func (a *App) registerAIRoutes(r chi.Router) {
+func modelBaseID(model string) string {\n\tif i := strings.LastIndex(model, ":"); i > strings.LastIndex(model, "/") { return model[:i] }\n\treturn model\n}\n\nfunc (a *App) registerAIRoutes(r chi.Router) {
 	r.Get("/ai/models", a.aiModelsHandler)
 	r.Post("/ai/chat", a.aiChatHandler)
 	r.Post("/ai/tools/{tool}", a.aiToolHandler)
@@ -105,7 +105,7 @@ func (a *App) aiModelsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, model := range allowed { set[model] = true }
 		filtered := make([]map[string]any, 0, len(payload.Data))
 		for _, model := range payload.Data {
-			if id, ok := model["id"].(string); ok && set[id] { filtered = append(filtered, model) }
+			if id, ok := model["id"].(string); ok && (set[id] || set[modelBaseID(id)]) { filtered = append(filtered, model) }
 		}
 		payload.Data = filtered
 	}
