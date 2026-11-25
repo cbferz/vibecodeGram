@@ -1,6 +1,6 @@
-# VibeCodeGram
+# vibecodeGram
 
-VibeCodeGram is an independent social messenger: its Android app talks only to the VibeCodeGram backend. It does **not** connect to Telegram and does not require Telegram API ID or API Hash.
+vibecodeGram is an independent social messenger: its Android app talks only to the vibecodeGram backend. It does **not** connect to Telegram and does not require Telegram API ID or API Hash.
 
 ## Architecture
 
