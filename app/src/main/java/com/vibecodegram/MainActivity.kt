@@ -5,6 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,31 +60,41 @@ private fun GlassPopupMenu(
 ) {
     if (!expanded) return
 
-    DropdownMenu(
-        expanded = expanded,
+    Popup(
+        alignment = Alignment.TopEnd,
         onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(224.dp),
-        shape = RoundedCornerShape(20.dp),
-        containerColor = theme.surface,
-        tonalElevation = 8.dp,
-        shadowElevation = 12.dp,
-        properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true)
-    ) {
-        Column(
-            modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            theme.surface.copy(alpha = .98f),
-                            theme.background.copy(alpha = .97f)
-                        )
-                    )
-                )
-                .border(1.dp, theme.accent.copy(alpha = .22f), RoundedCornerShape(20.dp))
-                .padding(7.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-            content = content
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
         )
+    ) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(animationSpec = tween(135)) + scaleIn(
+                initialScale = .72f,
+                transformOrigin = TransformOrigin(1f, .5f),
+                animationSpec = tween(190)
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(224.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                theme.surface.copy(alpha = .98f),
+                                theme.background.copy(alpha = .97f)
+                            )
+                        ),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .border(1.dp, theme.accent.copy(alpha = .22f), RoundedCornerShape(20.dp))
+                    .padding(7.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                content = content
+            )
+        }
     }
 }
 
