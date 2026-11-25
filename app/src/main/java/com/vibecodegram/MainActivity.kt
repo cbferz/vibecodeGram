@@ -61,15 +61,18 @@ private fun GlassPopupMenu(
 ) {
     if (!expanded) return
 
-    Popup(
-        alignment = Alignment.TopEnd,
+    DropdownMenu(
+        expanded = expanded,
         onDismissRequest = onDismissRequest,
+        modifier = Modifier.width(224.dp),
+        shape = RoundedCornerShape(20.dp),
+        containerColor = theme.surface,
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp,
         properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true)
     ) {
         Column(
             modifier = Modifier
-                .width(224.dp)
-                .clip(RoundedCornerShape(20.dp))
                 .background(
                     Brush.verticalGradient(
                         listOf(
