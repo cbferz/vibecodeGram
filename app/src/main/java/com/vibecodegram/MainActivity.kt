@@ -137,6 +137,11 @@ private fun VibeCodeGramApp(prefs: android.content.SharedPreferences) {
     var accentIndex by remember { mutableIntStateOf(prefs.getInt("accent", -1)) }
     var glass by remember { mutableFloatStateOf(prefs.getFloat("glass", .72f).coerceIn(.2f, 1f)) }
     var compact by remember { mutableStateOf(prefs.getBoolean("compact", false)) }
+    var profileHue by remember { mutableFloatStateOf(prefs.getFloat("profile_hue", 210f).coerceIn(0f, 360f)) }
+    var profileSaturation by remember { mutableFloatStateOf(prefs.getFloat("profile_saturation", .72f).coerceIn(0f, 1f)) }
+    var profileBrightness by remember { mutableFloatStateOf(prefs.getFloat("profile_brightness", .88f).coerceIn(0f, 1f)) }
+    var profileGradient by remember { mutableStateOf(prefs.getBoolean("profile_gradient", true)) }
+    var profileEditor by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("Все") }
@@ -170,10 +175,25 @@ private fun VibeCodeGramApp(prefs: android.content.SharedPreferences) {
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact)
                         2 -> VideosScreen(theme)
                         3 -> ExploreScreen(theme, search, { search = it })
-                        else -> ProfileScreen(theme, paletteIndex, onCustomize = { editor = true })
+                        else -> ProfileScreen(
+                            theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
+                            onCustomize = { editor = true },
+                            onProfileColors = { profileEditor = true }
+                        )
                     }
                 }
             }
+        }
+        if (profileEditor) {
+            ProfileColorEditor(
+                hue = profileHue, saturation = profileSaturation, brightness = profileBrightness,
+                gradient = profileGradient, theme = theme,
+                onHue = { profileHue = it; prefs.edit().putFloat("profile_hue", it).apply() },
+                onSaturation = { profileSaturation = it; prefs.edit().putFloat("profile_saturation", it).apply() },
+                onBrightness = { profileBrightness = it; prefs.edit().putFloat("profile_brightness", it).apply() },
+                onGradient = { profileGradient = it; prefs.edit().putBoolean("profile_gradient", it).apply() },
+                onClose = { profileEditor = false }
+            )
         }
         if (editor) {
             AppearanceEditor(
@@ -358,25 +378,65 @@ private fun ExploreScreen(theme: Palette, search: String, onSearch: (String) -> 
 }
 
 @Composable
-private fun ProfileScreen(theme: Palette, paletteIndex: Int, onCustomize: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(16.dp))
-        Avatar("V", theme.accent, 86)
-        Spacer(Modifier.height(12.dp))
-        Text("Твой профиль", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-        Text("@your_username", color = theme.secondary, fontSize = 13.sp)
-        Spacer(Modifier.height(22.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            ProfileStat("0", "Публикации", theme)
-            ProfileStat("0", "Подписчики", theme)
-            ProfileStat("0", "Подписки", theme)
+private fun ProfileScreen(
+    theme: Palette,
+    paletteIndex: Int,
+    profileHue: Float,
+    profileSaturation: Float,
+    profileBrightness: Float,
+    profileGradient: Boolean,
+    onCustomize: () -> Unit,
+    onProfileColors: () -> Unit
+) {
+    val profileColor = Color.hsv(profileHue, profileSaturation, profileBrightness)
+    val profileDeep = Color.hsv((profileHue + 34f) % 360f, (profileSaturation * .92f).coerceIn(0f, 1f), (profileBrightness * .43f).coerceIn(.08f, 1f))
+    val profileBrush = if (profileGradient) Brush.linearGradient(listOf(profileColor, profileDeep, profileColor.copy(alpha = .72f))) else Brush.linearGradient(listOf(profileColor, profileColor))
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Spacer(Modifier.height(8.dp))
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                .background(Brush.verticalGradient(listOf(profileColor.copy(alpha = .18f), theme.surface.copy(alpha = .96f))))
+                .border(1.dp, profileColor.copy(alpha = .42f), RoundedCornerShape(28.dp))
+                .padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(116.dp).clip(RoundedCornerShape(20.dp)).background(profileBrush),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("vibecodeGram", color = Color.White.copy(alpha = .92f), fontSize = 24.sp, fontWeight = FontWeight.Black, letterSpacing = (-.7).sp)
+            }
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.size(94.dp).clip(CircleShape).background(profileBrush).border(3.dp, theme.surface, CircleShape), contentAlignment = Alignment.Center) {
+                Text("V", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("Твой профиль", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            Text("@your_username", color = theme.secondary, fontSize = 13.sp)
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                ProfileStat("0", "Публикации", theme)
+                ProfileStat("0", "Подписчики", theme)
+                ProfileStat("0", "Подписки", theme)
+            }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = onProfileColors,
+                border = androidx.compose.foundation.BorderStroke(1.dp, profileColor.copy(alpha = .75f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = profileColor),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Default.ColorLens, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Цвет профиля")
+            }
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(12.dp))
         GlassCard(theme) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Palette, null, tint = theme.accent)
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) { Text("Оформление", color = Color.White, fontWeight = FontWeight.SemiBold); Text("Тема: ${palettes[paletteIndex].name}", color = theme.secondary, fontSize = 12.sp) }
+                Column(Modifier.weight(1f)) { Text("Оформление приложения", color = Color.White, fontWeight = FontWeight.SemiBold); Text("Тема: ${palettes[paletteIndex].name}", color = theme.secondary, fontSize = 12.sp) }
                 TextButton(onClick = onCustomize) { Text("Изменить") }
             }
         }
@@ -391,6 +451,76 @@ private fun ProfileScreen(theme: Palette, paletteIndex: Int, onCustomize: () -> 
             SettingsRow(Icons.Default.HelpOutline, "Помощь и поддержка", theme)
         }
     }
+}
+
+@Composable
+private fun ProfileColorEditor(
+    hue: Float,
+    saturation: Float,
+    brightness: Float,
+    gradient: Boolean,
+    theme: Palette,
+    onHue: (Float) -> Unit,
+    onSaturation: (Float) -> Unit,
+    onBrightness: (Float) -> Unit,
+    onGradient: (Boolean) -> Unit,
+    onClose: () -> Unit
+) {
+    val color = Color.hsv(hue, saturation, brightness)
+    val deep = Color.hsv((hue + 34f) % 360f, saturation, (brightness * .43f).coerceIn(.08f, 1f))
+    val presets = listOf(205f, 265f, 325f, 350f, 18f, 42f, 125f, 165f)
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = theme.surface,
+        title = { Text("Цвет профиля", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
+                Box(
+                    Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(20.dp))
+                        .background(if (gradient) Brush.linearGradient(listOf(color, deep, color.copy(alpha = .72f))) else Brush.linearGradient(listOf(color, color))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(54.dp).clip(CircleShape).background(Color.White.copy(alpha = .22f)), contentAlignment = Alignment.Center) {
+                            Text("V", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column { Text("Твой профиль", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("@your_username", color = Color.White.copy(alpha = .8f), fontSize = 12.sp) }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Text("ГОТОВЫЕ ЦВЕТА", color = theme.secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    presets.forEach { preset ->
+                        val presetColor = Color.hsv(preset, .76f, .92f)
+                        Box(
+                            Modifier.size(31.dp).clip(CircleShape).background(presetColor)
+                                .border(if (kotlin.math.abs(hue - preset) < 12f) 3.dp else 1.dp, Color.White.copy(alpha = if (kotlin.math.abs(hue - preset) < 12f) 1f else .25f), CircleShape)
+                                .clickable { onHue(preset); onSaturation(.76f); onBrightness(.92f) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Text("ОТТЕНОК · ${hue.roundToInt()}°", color = theme.secondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Slider(value = hue, onValueChange = onHue, valueRange = 0f..360f, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = color, inactiveTrackColor = Color.White.copy(alpha = .16f)))
+                Text("НАСЫЩЕННОСТЬ · ${(saturation * 100).roundToInt()}%", color = theme.secondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Slider(value = saturation, onValueChange = onSaturation, valueRange = 0f..1f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Text("ЯРКОСТЬ · ${(brightness * 100).roundToInt()}%", color = theme.secondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Slider(value = brightness, onValueChange = onBrightness, valueRange = .12f..1f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Градиент профиля", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("Плавный переход между двумя оттенками", color = theme.secondary, fontSize = 11.sp)
+                    }
+                    Switch(checked = gradient, onCheckedChange = onGradient, colors = SwitchDefaults.colors(checkedThumbColor = theme.background, checkedTrackColor = color))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Цвет сохраняется автоматически и применяется к шапке и аватару профиля.", color = theme.secondary, fontSize = 11.sp, lineHeight = 16.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Готово", color = theme.accent) } }
+    )
 }
 
 @Composable
