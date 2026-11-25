@@ -37,6 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -47,6 +50,63 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.shapes.Capsule
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+
+@Composable
+private fun GlassPopupMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    theme: Palette,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    if (!expanded) return
+
+    Popup(
+        alignment = Alignment.TopEnd,
+        onDismissRequest = onDismissRequest,
+        properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .width(224.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            theme.surface.copy(alpha = .98f),
+                            theme.background.copy(alpha = .97f)
+                        )
+                    )
+                )
+                .border(1.dp, theme.accent.copy(alpha = .22f), RoundedCornerShape(20.dp))
+                .padding(7.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun GlassMenuItem(
+    icon: ImageVector,
+    label: String,
+    theme: Palette,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(13.dp))
+            .clickable(onClick = onClick)
+            .background(theme.accent.copy(alpha = .045f))
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = theme.accent, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(11.dp))
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
 
 private data class Palette(val name: String, val background: Color, val surface: Color, val accent: Color, val secondary: Color, val glow: Color)
 private val palettes = listOf(
@@ -184,10 +244,10 @@ private fun FeedScreen(theme: Palette, compact: Boolean) {
                     }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreHoriz, "Ещё", tint = theme.secondary) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text("Сохранить") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.BookmarkBorder, null) })
-                            DropdownMenuItem(text = { Text("Скрыть публикацию") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.VisibilityOff, null) })
-                            DropdownMenuItem(text = { Text("Поделиться") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.Share, null) })
+                        GlassPopupMenu(expanded = menu, onDismissRequest = { menu = false }, theme = theme) {
+                            GlassMenuItem(Icons.Default.BookmarkBorder, "Сохранить", theme) { menu = false }
+                            GlassMenuItem(Icons.Default.VisibilityOff, "Скрыть публикацию", theme) { menu = false }
+                            GlassMenuItem(Icons.Default.Share, "Поделиться", theme) { menu = false }
                         }
                     }
                 }
@@ -248,10 +308,10 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
                     }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, null, tint = theme.secondary) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text("Закрепить") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.PushPin, null) })
-                            DropdownMenuItem(text = { Text("В архив") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.Archive, null) })
-                            DropdownMenuItem(text = { Text("Отключить уведомления") }, onClick = { menu = false }, leadingIcon = { Icon(Icons.Default.NotificationsOff, null) })
+                        GlassPopupMenu(expanded = menu, onDismissRequest = { menu = false }, theme = theme) {
+                            GlassMenuItem(Icons.Default.PushPin, "Закрепить", theme) { menu = false }
+                            GlassMenuItem(Icons.Default.Archive, "В архив", theme) { menu = false }
+                            GlassMenuItem(Icons.Default.NotificationsOff, "Отключить уведомления", theme) { menu = false }
                         }
                     }
                 }
