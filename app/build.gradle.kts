@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.vibecodegram"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.vibecodegram"
         minSdk = 26
@@ -40,15 +40,17 @@ android {
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.11.00"))
-    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation(platform("androidx.compose:compose-bom:2026.08.00"))
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("io.github.kyant0:backdrop:1.0.6")
-    implementation("io.github.kyant0:shapes:1.2.0")
+    implementation("io.github.kyant0:backdrop-android:2.0.1")
+    implementation("io.github.kyant0:shapes-android:1.2.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

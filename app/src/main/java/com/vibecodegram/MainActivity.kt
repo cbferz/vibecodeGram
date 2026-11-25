@@ -5,13 +5,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,8 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,15 +36,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import android.os.Build
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.catalog.components.LiquidBottomTab
+import com.kyant.backdrop.catalog.components.LiquidBottomTabs
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.shapes.Capsule
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 
@@ -166,25 +160,26 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
             containerColor = theme.background,
             bottomBar = {
                 LiquidGlassNavigationBar(destinations, page, { page = it }, backdrop, theme, glass,
-                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp))
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp))
             }
         ) { padding ->
             Box(
                 Modifier.fillMaxSize().layerBackdrop(backdrop)
                     .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background)))
-                    .padding(padding)
+                    .padding(top = padding.calculateTopPadding(), start = padding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current), end = padding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current))
             ) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
-                        0 -> FeedScreen(theme, compact)
-                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it })
-                        2 -> VideosScreen(theme)
-                        3 -> ExploreScreen(theme, search, { search = it })
+                        0 -> FeedScreen(theme, compact, padding.calculateBottomPadding())
+                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = padding.calculateBottomPadding())
+                        2 -> VideosScreen(theme, padding.calculateBottomPadding())
+                        3 -> ExploreScreen(theme, search, { search = it }, padding.calculateBottomPadding())
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
                             onCustomize = { editor = true },
-                            onProfileColors = { profileEditor = true }
+                            onProfileColors = { profileEditor = true },
+                            bottomInset = padding.calculateBottomPadding()
                         )
                     }
                 }
@@ -236,7 +231,7 @@ private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, de
 }
 
 @Composable
-private fun FeedScreen(theme: Palette, compact: Boolean) {
+private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.compose.ui.unit.Dp) {
     var selectedFilter by remember { mutableStateOf("Для тебя") }
     var liked by remember { mutableStateOf(setOf<Int>()) }
     val posts = listOf(
@@ -249,7 +244,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean) {
             FilterChip(selected = selectedFilter == label, onClick = { selectedFilter = label }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
         }
     }
-    LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
         item { GlassCard(theme, compact) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar("Ты", theme.accent, 42)
@@ -301,7 +296,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean) {
 }
 
 @Composable
-private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean, onOpenChat: (Chat) -> Unit) {
+private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean, onOpenChat: (Chat) -> Unit, bottomInset: androidx.compose.ui.unit.Dp) {
     val chats = listOf(
         Chat("Лера", "Отправила фотографию", "21:14", 2, true),
         Chat("Разработка vibecodeGram", "Алекс: залил новый интерфейс", "20:58", 5, true, true),
@@ -315,7 +310,7 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
             FilterChip(selected = folder == label, onClick = { onFolder(label) }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
         }
     }
-    LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 9.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 9.dp)) {
         items(chats.filter { it.name.contains(search, true) || it.message.contains(search, true) }.filter { folder == "Все" || folder == "Непрочитанные" && it.unread > 0 || folder == "Группы" && it.group || folder == "Личные" && !it.group }) { chat ->
             var menu by remember { mutableStateOf(false) }
             GlassCard(theme, compact, Modifier.combinedClickable(onClick = { onOpenChat(chat) }, onLongClick = { menu = true })) {
@@ -411,8 +406,8 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, prefs: android.content.Sh
 }
 
 @Composable
-private fun VideosScreen(theme: Palette) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun VideosScreen(theme: Palette, bottomInset: androidx.compose.ui.unit.Dp) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { GlassCard(theme) {
             Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(theme.glow, theme.surface, theme.accent.copy(alpha = .24f)))), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -427,12 +422,12 @@ private fun VideosScreen(theme: Palette) {
 }
 
 @Composable
-private fun ExploreScreen(theme: Palette, search: String, onSearch: (String) -> Unit) {
+private fun ExploreScreen(theme: Palette, search: String, onSearch: (String) -> Unit, bottomInset: androidx.compose.ui.unit.Dp) {
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         OutlinedTextField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Найти темы и авторов") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp))
         Text("Открывай новое", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 18.dp))
         val topics = listOf("Технологии" to "12,4 тыс. публикаций", "Музыка" to "8,2 тыс. публикаций", "Фотография" to "5,7 тыс. публикаций", "Игры" to "4,9 тыс. публикаций", "Дизайн" to "3,1 тыс. публикаций")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        LazyColumn(contentPadding = PaddingValues(bottom = bottomInset + 9.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             items(topics.filter { it.first.contains(search, true) }) { topic ->
                 GlassCard(theme) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -456,12 +451,13 @@ private fun ProfileScreen(
     profileBrightness: Float,
     profileGradient: Boolean,
     onCustomize: () -> Unit,
-    onProfileColors: () -> Unit
+    onProfileColors: () -> Unit,
+    bottomInset: androidx.compose.ui.unit.Dp
 ) {
     val profileColor = Color.hsv(profileHue, profileSaturation, profileBrightness)
     val profileDeep = Color.hsv((profileHue + 34f) % 360f, (profileSaturation * .92f).coerceIn(0f, 1f), (profileBrightness * .43f).coerceIn(.08f, 1f))
     val profileBrush = if (profileGradient) Brush.linearGradient(listOf(profileColor, profileDeep, profileColor.copy(alpha = .72f))) else Brush.linearGradient(listOf(profileColor, profileColor))
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(8.dp))
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
@@ -675,38 +671,48 @@ private fun GlassCard(theme: Palette, compact: Boolean = false, modifier: Modifi
 }
 
 @Composable
-private fun LiquidGlassNavigationBar(items: List<Destination>, selectedIndex: Int, onSelected: (Int) -> Unit, backdrop: Backdrop, theme: Palette, intensity: Float, modifier: Modifier = Modifier) {
-    val indicator = remember { Animatable(selectedIndex.toFloat()) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(selectedIndex) { indicator.animateTo(selectedIndex.toFloat(), spring(dampingRatio = .72f, stiffness = 520f)) }
-    Box(modifier, contentAlignment = Alignment.Center) {
-        BoxWithConstraints(
-            Modifier.fillMaxWidth(.98f).height(70.dp)
-                .drawBackdrop(backdrop = backdrop, shape = { Capsule() }, effects = {
-                    vibrancy()
-                    blur((4f + 9f * intensity).dp.toPx())
-                    lens((10f + 12f * intensity).dp.toPx(), (18f + 10f * intensity).dp.toPx(), depthEffect = true)
-                }, onDrawSurface = { drawRect(theme.surface.copy(alpha = .72f)) })
-                .border(1.dp, Color.White.copy(alpha = .19f), Capsule()).padding(4.dp)
-        ) {
-            val tabWidth = maxWidth / items.size
-            val tabWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { tabWidth.toPx() }
-            Box(Modifier.offset(x = tabWidth * indicator.value).size(width = tabWidth, height = maxHeight).padding(2.dp)
-                .drawBackdrop(backdrop = backdrop, shape = { Capsule() }, effects = { vibrancy(); blur(2.dp.toPx()); lens(12.dp.toPx(), 20.dp.toPx(), chromaticAberration = true) },
-                    onDrawSurface = { drawRect(theme.accent.copy(alpha = .13f)); drawRect(Brush.verticalGradient(listOf(Color.White.copy(.16f), Color.White.copy(.025f)))) }))
-            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                items.forEachIndexed { index, item ->
-                    Column(Modifier.weight(1f).fillMaxHeight().clip(Capsule())
-                        .pointerInput(index, tabWidthPx) {
-                            detectDragGestures(onDragEnd = { val target = indicator.value.roundToInt().coerceIn(items.indices); scope.launch { indicator.animateTo(target.toFloat(), spring()); onSelected(target) } },
-                                onDragCancel = { scope.launch { indicator.animateTo(selectedIndex.toFloat(), spring()) } },
-                                onDrag = { change, amount -> change.consume(); val next = (indicator.value + amount.x / tabWidthPx).coerceIn(0f, items.lastIndex.toFloat()); scope.launch { indicator.snapTo(next) } })
-                        }.clickable { onSelected(index) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Icon(item.icon, item.label, tint = if (selectedIndex == index) theme.accent else theme.secondary, modifier = Modifier.size(21.dp))
-                        Spacer(Modifier.height(3.dp))
-                        Text(item.label, color = if (selectedIndex == index) Color.White else theme.secondary, fontSize = 9.sp, maxLines = 1)
-                    }
-                }
+private fun LiquidGlassNavigationBar(
+    items: List<Destination>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+    backdrop: Backdrop,
+    theme: Palette,
+    intensity: Float,
+    modifier: Modifier = Modifier
+) {
+    var shown by remember { mutableIntStateOf(selectedIndex) }
+    LaunchedEffect(selectedIndex) { shown = selectedIndex }
+    val shownState = rememberUpdatedState(shown)
+    val selectedTabIndex = remember { { shownState.value } }
+    val selectedState = rememberUpdatedState(selectedIndex)
+    val onSelectedState = rememberUpdatedState(onSelected)
+    val blurs = Build.VERSION.SDK_INT >= 31
+    val refracts = Build.VERSION.SDK_INT >= 33
+
+    LiquidBottomTabs(
+        selectedTabIndex = selectedTabIndex,
+        onTabSelected = { index ->
+            shown = index
+            if (index != selectedState.value) onSelectedState.value(index)
+        },
+        backdrop = backdrop,
+        tabsCount = items.size,
+        modifier = modifier,
+        accentColor = theme.accent,
+        stiffness = 320f,
+        blurs = blurs,
+        refracts = refracts,
+        intensity = intensity,
+        isLightTheme = false,
+        containerColor = theme.surface.copy(alpha = if (blurs) .38f + .18f * (1f - intensity) else .96f)
+    ) {
+        items.forEachIndexed { index, item ->
+            LiquidBottomTab(
+                onClick = { shown = index },
+                modifier = Modifier.semantics { selected = index == shown }
+            ) {
+                Icon(item.icon, contentDescription = null, tint = theme.secondary, modifier = Modifier.size(21.dp))
+                Text(item.label, color = theme.secondary, fontSize = 9.sp, maxLines = 1)
             }
         }
     }

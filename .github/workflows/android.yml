@@ -30,16 +30,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Gradle with dependency caching
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.11.1'
+          gradle-version: '9.7.1'
 
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
@@ -55,8 +55,8 @@ jobs:
 
           packages=(
             'platform-tools'
-            'platforms;android-36'
-            'build-tools;36.0.0'
+            'platforms;android-37.0'
+            'build-tools;37.0.0'
             'cmake;3.22.1'
             'ndk;27.2.12479018'
           )
@@ -64,8 +64,8 @@ jobs:
           for package in "${packages[@]}"; do
             case "$package" in
               platform-tools) target="$SDK_ROOT/platform-tools" ;;
-              platforms\;android-36) target="$SDK_ROOT/platforms/android-36" ;;
-              build-tools\;36.0.0) target="$SDK_ROOT/build-tools/36.0.0" ;;
+              platforms\;android-37.0) target="$SDK_ROOT/platforms/android-37.0" ;;
+              build-tools\;37.0.0) target="$SDK_ROOT/build-tools/37.0.0" ;;
               cmake\;3.22.1) target="$SDK_ROOT/cmake/3.22.1" ;;
               ndk\;27.2.12479018) target="$SDK_ROOT/ndk/27.2.12479018" ;;
               *) echo "Unknown SDK component: $package" >&2; exit 1 ;;
@@ -115,8 +115,8 @@ jobs:
           set -Eeuo pipefail
           APK='app/build/outputs/apk/release/app-release.apk'
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep -F "package: name='com.vibecodegram'"
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | grep -F "package: name='com.vibecodegram'"
           echo "Verified signed Release APK: $APK"
 
       - name: Upload Release APK artifact
