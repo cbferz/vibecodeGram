@@ -1,7 +1,6 @@
 package main
 
 import (
- "context"
  "database/sql"
  "net/http"
  "os"
@@ -82,8 +81,8 @@ func (a *App) grantBadge(w http.ResponseWriter,r *http.Request) {
  allowed,full:=a.canManageBadges(uid(r)); if !allowed { fail(w,403,"staff permission required"); return }
  if in.Badge=="founder"||in.Badge=="developer"||in.Badge=="co_developer"||in.Badge=="architect" { if !full { fail(w,403,"only founder or developer can grant this badge"); return } }
  if in.Badge=="team"&&!full { /* co-developers may grant Team */ }
- var premiumOnly,staffOnly bool
- if err=a.db.QueryRowContext(r.Context(),"SELECT premium_only,staff_only FROM badges WHERE code=$1",in.Badge).Scan(&premiumOnly,&staffOnly); err!=nil { fail(w,404,"badge not found"); return }
+ var premiumOnly bool
+ if err=a.db.QueryRowContext(r.Context(),"SELECT premium_only FROM badges WHERE code=$1",in.Badge).Scan(&premiumOnly); err!=nil { fail(w,404,"badge not found"); return }
  if premiumOnly { fail(w,403,"premium badges are assigned by subscription service"); return }
  tx,err:=a.db.BeginTx(r.Context(),nil); if err!=nil { fail(w,500,"database error"); return }; defer tx.Rollback()
  if _,err=tx.ExecContext(r.Context(),"INSERT INTO user_badges(user_id,badge_code,granted_by) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",target,in.Badge,uid(r)); err!=nil { fail(w,404,"user not found or badge unavailable"); return }
