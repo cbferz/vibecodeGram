@@ -14,7 +14,8 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
-        versionName = "0.2.0"
+        versionName = "0.3.0"
+        buildConfigField("String", "API_BASE_URL", "\"https://api.vibecodegram.tendercheck.pro\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         externalNativeBuild { cmake { cppFlags += listOf("-std=c++20") } }
     }
@@ -36,7 +37,7 @@ android {
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
