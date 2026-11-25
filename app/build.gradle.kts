@@ -1,10 +1,10 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 android {
     namespace = "com.vibecodegram"
@@ -47,14 +47,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget = JvmTarget.JVM_17
-        }
-    }
-
     buildFeatures {
         compose = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
