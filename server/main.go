@@ -21,7 +21,7 @@ import (
  "golang.org/x/crypto/bcrypt"
 )
 
-//go:embed migrations/001_init.sql
+//go:embed migrations/*.sql
 var migrationFS embed.FS
 
 type App struct { db *sql.DB; jwtSecret []byte }
@@ -41,14 +41,14 @@ func main() {
  db.SetMaxOpenConns(25); db.SetMaxIdleConns(5); db.SetConnMaxLifetime(30*time.Minute)
  ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second); defer cancel()
  for { if err=db.PingContext(ctx); err==nil { break }; if ctx.Err()!=nil { log.Fatal("database unavailable: ",err) }; time.Sleep(time.Second) }
- migration,err:=migrationFS.ReadFile("migrations/001_init.sql"); if err!=nil { log.Fatal(err) }
- if _,err=db.ExecContext(ctx,string(migration)); err!=nil { log.Fatal("migration: ",err) }
+ migrationFiles,err:=migrationFS.ReadDir("migrations"); if err!=nil { log.Fatal(err) }
+ for _,file:=range migrationFiles { if file.IsDir() || !strings.HasSuffix(file.Name(),".sql") { continue }; migration,readErr:=migrationFS.ReadFile("migrations/"+file.Name()); if readErr!=nil { log.Fatal(readErr) }; if _,err=db.ExecContext(ctx,string(migration)); err!=nil { log.Fatalf("migration %s: %v",file.Name(),err) } }
  a:=&App{db:db,jwtSecret:[]byte(secret)}
  r:=chi.NewRouter(); r.Use(middleware.RequestID,middleware.RealIP,middleware.Recoverer,middleware.Timeout(20*time.Second))
  r.Get("/healthz",func(w http.ResponseWriter,r *http.Request){ if err:=db.PingContext(r.Context()); err!=nil { fail(w,503,"database unavailable"); return }; writeJSON(w,200,map[string]string{"status":"ok","service":"vibecodegram-api"}) })
  r.Route("/v1",func(v chi.Router){
   v.Post("/auth/register",a.register); v.Post("/auth/login",a.login)
-  v.Group(func(p chi.Router){ p.Use(a.authenticate); a.registerAIRoutes(p); p.Get("/me",a.me); p.Get("/conversations",a.listConversations); p.Post("/conversations",a.createConversation); p.Get("/conversations/{id}/messages",a.listMessages); p.Post("/conversations/{id}/messages",a.sendMessage) })
+  v.Group(func(p chi.Router){ p.Use(a.authenticate); a.registerAIRoutes(p); p.Get("/me",a.me); p.Get("/me/badges",a.myBadges); p.Get("/devices/accounts",a.listDeviceAccounts); p.Post("/devices/accounts",a.addDeviceAccount); p.Delete("/devices/accounts/{accountID}",a.removeDeviceAccount); p.Post("/admin/users/{id}/badges",a.grantBadge); p.Delete("/admin/users/{id}/badges/{badge}",a.revokeBadge); p.Get("/conversations",a.listConversations); p.Post("/conversations",a.createConversation); p.Get("/conversations/{id}/messages",a.listMessages); p.Post("/conversations/{id}/messages",a.sendMessage) })
  })
  r.Get("/v1/ws",a.websocket)
  addr:=os.Getenv("HTTP_ADDR"); if addr=="" { addr=":8080" }
