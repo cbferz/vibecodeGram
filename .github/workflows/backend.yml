@@ -22,7 +22,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23.x"
-          cache-dependency-path: server/go.sum
       - name: Format Go sources
         working-directory: server
         run: gofmt -w *.go
