@@ -51,6 +51,7 @@ func main() {
   v.Post("/auth/register",a.register); v.Post("/auth/login",a.login)
   v.Group(func(p chi.Router){ p.Use(a.authenticate); a.registerAIRoutes(p); p.Get("/me",a.me); p.Get("/me/badges",a.myBadges); p.Get("/devices/accounts",a.listDeviceAccounts); p.Post("/devices/accounts",a.addDeviceAccount); p.Delete("/devices/accounts/{accountID}",a.removeDeviceAccount); p.Post("/admin/users/{id}/badges",a.grantBadge); p.Delete("/admin/users/{id}/badges/{badge}",a.revokeBadge); p.Get("/conversations",a.listConversations); p.Post("/conversations",a.createConversation); p.Get("/conversations/{id}/messages",a.listMessages); p.Post("/conversations/{id}/messages",a.sendMessage) })
  })
+ r.Put("/internal/subscriptions/{id}",a.subscriptionWebhook)
  r.Get("/v1/ws",a.websocket)
  addr:=os.Getenv("HTTP_ADDR"); if addr=="" { addr=":8080" }
  srv:=&http.Server{Addr:addr,Handler:r,ReadHeaderTimeout:5*time.Second}
