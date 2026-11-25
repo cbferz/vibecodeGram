@@ -48,7 +48,7 @@ func main() {
  r.Get("/healthz",func(w http.ResponseWriter,r *http.Request){ if err:=db.PingContext(r.Context()); err!=nil { fail(w,503,"database unavailable"); return }; writeJSON(w,200,map[string]string{"status":"ok","service":"vibecodegram-api"}) })
  r.Route("/v1",func(v chi.Router){
   v.Post("/auth/register",a.register); v.Post("/auth/login",a.login)
-  v.Group(func(p chi.Router){ p.Use(a.authenticate); p.Get("/me",a.me); p.Get("/conversations",a.listConversations); p.Post("/conversations",a.createConversation); p.Get("/conversations/{id}/messages",a.listMessages); p.Post("/conversations/{id}/messages",a.sendMessage) })
+  v.Group(func(p chi.Router){ p.Use(a.authenticate); a.registerAIRoutes(p); p.Get("/me",a.me); p.Get("/conversations",a.listConversations); p.Post("/conversations",a.createConversation); p.Get("/conversations/{id}/messages",a.listMessages); p.Post("/conversations/{id}/messages",a.sendMessage) })
  })
  r.Get("/v1/ws",a.websocket)
  addr:=os.Getenv("HTTP_ADDR"); if addr=="" { addr=":8080" }
