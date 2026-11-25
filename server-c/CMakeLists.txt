@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(vibecodegram_server C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+add_executable(vibecodegram-server src/main.c)
+target_compile_options(vibecodegram-server PRIVATE -Wall -Wextra -Wpedantic)
