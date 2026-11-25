@@ -79,7 +79,8 @@ func (a *App) grantBadge(w http.ResponseWriter,r *http.Request) {
  var in struct { Badge string `json:"badge"` }
  if decode(r,&in)!=nil { fail(w,400,"invalid request"); return }; in.Badge=strings.TrimSpace(in.Badge)
  allowed,full:=a.canManageBadges(uid(r)); if !allowed { fail(w,403,"staff permission required"); return }
- if in.Badge=="founder"||in.Badge=="developer"||in.Badge=="co_developer"||in.Badge=="architect" { if !full { fail(w,403,"only founder or developer can grant this badge"); return } }
+ if in.Badge=="founder" { founderRaw:=strings.TrimSpace(os.Getenv("FOUNDER_USER_ID")); founderID,_:=strconv.ParseInt(founderRaw,10,64); if founderID<1||uid(r)!=founderID { fail(w,403,"only the configured founder can grant Founder"); return } }
+ if in.Badge=="developer"||in.Badge=="co_developer"||in.Badge=="architect" { if !full { fail(w,403,"only founder or developer can grant this badge"); return } }
  if in.Badge=="team"&&!full { /* co-developers may grant Team */ }
  var premiumOnly bool
  if err=a.db.QueryRowContext(r.Context(),"SELECT premium_only FROM badges WHERE code=$1",in.Badge).Scan(&premiumOnly); err!=nil { fail(w,404,"badge not found"); return }
@@ -95,7 +96,8 @@ func (a *App) revokeBadge(w http.ResponseWriter,r *http.Request) {
  target,err:=strconv.ParseInt(chi.URLParam(r,"id"),10,64); code:=strings.TrimSpace(chi.URLParam(r,"badge"))
  if err!=nil||target<1 { fail(w,400,"invalid user id"); return }
  allowed,full:=a.canManageBadges(uid(r)); if !allowed { fail(w,403,"staff permission required"); return }
- if code=="founder"||code=="developer"||code=="co_developer"||code=="architect" { if !full { fail(w,403,"only founder or developer can revoke this badge"); return } }
+ if code=="founder" { founderRaw:=strings.TrimSpace(os.Getenv("FOUNDER_USER_ID")); founderID,_:=strconv.ParseInt(founderRaw,10,64); if founderID<1||uid(r)!=founderID { fail(w,403,"only the configured founder can revoke Founder"); return } }
+ if code=="developer"||code=="co_developer"||code=="architect" { if !full { fail(w,403,"only founder or developer can revoke this badge"); return } }
  if code=="premium"||code=="premium_plus"||code=="premium_elite" { fail(w,403,"premium badges are managed by subscription service"); return }
  tx,err:=a.db.BeginTx(r.Context(),nil); if err!=nil { fail(w,500,"database error"); return }; defer tx.Rollback()
  if _,err=tx.ExecContext(r.Context(),"DELETE FROM user_badges WHERE user_id=$1 AND badge_code=$2",target,code); err!=nil { fail(w,500,"could not revoke badge"); return }
