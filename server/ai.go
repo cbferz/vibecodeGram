@@ -64,7 +64,14 @@ func aiModels() []string {
 	return out
 }
 
-func modelBaseID(model string) string {\n\tif i := strings.LastIndex(model, ":"); i > strings.LastIndex(model, "/") { return model[:i] }\n\treturn model\n}\n\nfunc (a *App) registerAIRoutes(r chi.Router) {
+func modelBaseID(model string) string {
+	if i := strings.LastIndex(model, ":"); i > strings.LastIndex(model, "/") {
+		return model[:i]
+	}
+	return model
+}
+
+func (a *App) registerAIRoutes(r chi.Router) {
 	r.Get("/ai/models", a.aiModelsHandler)
 	r.Post("/ai/chat", a.aiChatHandler)
 	r.Post("/ai/tools/{tool}", a.aiToolHandler)
