@@ -1,4 +1,4 @@
-name: vibecodeGram Android CI
+name: vibecodeGram Android Release
 
 on:
   push:
@@ -15,15 +15,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: vibecodegram-android-${{ github.ref }}
+  group: vibecodegram-android-release-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  android:
-    name: Build vibecodeGram APK
+  android-release:
+    name: Build signed vibecodeGram Release APK
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -76,23 +76,47 @@ jobs:
             echo "All required Android SDK components are already installed."
           fi
 
-      - name: Build debug APK
+      - name: Prepare persistent release signing key
         shell: bash
-        run: gradle --no-daemon --console=plain :app:assembleDebug
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          KEYSTORE="$RUNNER_TEMP/vibecodegram-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
-      - name: Verify APK
+      - name: Build Release APK only
         shell: bash
         run: |
           set -Eeuo pipefail
-          APK='app/build/outputs/apk/debug/app-debug.apk'
+          gradle --no-daemon --console=plain :app:assembleRelease -PversionCode="$GITHUB_RUN_NUMBER"
+
+      - name: Verify signed Release APK
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APK='app/build/outputs/apk/release/app-release.apk'
           test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep -F "package: name='com.vibecodegram'"
+          echo "Verified signed Release APK: $APK"
 
-      - name: Upload APK artifact
+      - name: Upload Release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vibecodegram-apk-${{ github.run_id }}-${{ github.run_attempt }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: vibecodegram-release-${{ github.run_number }}-${{ github.run_attempt }}
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
           compression-level: 0

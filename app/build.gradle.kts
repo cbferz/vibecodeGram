@@ -4,6 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 android {
     namespace = "com.vibecodegram"
     compileSdk = 36
@@ -12,8 +14,17 @@ android {
         applicationId = "com.vibecodegram"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = System.getenv("ANDROID_KEYSTORE_PATH")?.let { file(it) }
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
@@ -22,6 +33,7 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -35,8 +47,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+        }
     }
 
     buildFeatures {
