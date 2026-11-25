@@ -40,3 +40,5 @@ CREATE TABLE IF NOT EXISTS device_accounts (
   PRIMARY KEY(device_id,account_id)
 );
 CREATE INDEX IF NOT EXISTS device_accounts_account_idx ON device_accounts(account_id);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_tier VARCHAR(16) NOT NULL DEFAULT 'none' CHECK (premium_tier IN ('none','premium','premium_plus','premium_elite'));
