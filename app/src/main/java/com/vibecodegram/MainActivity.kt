@@ -659,8 +659,6 @@ private fun ProfileStat(value: String, label: String, theme: Palette) {
 }
 
 @Composable
-
-@Composable
 private fun ServerStatusCard(theme: Palette) {
     var status by remember { mutableStateOf("Проверяем подключение…") }
     var checking by remember { mutableStateOf(true) }
@@ -695,6 +693,7 @@ private fun ServerStatusCard(theme: Palette) {
     }
 }
 
+@Composable
 private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, theme: Palette) {
     Row(Modifier.fillMaxWidth().clickable { }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = theme.accent, modifier = Modifier.size(19.dp))
