@@ -50,6 +50,11 @@ import com.kyant.backdrop.catalog.components.LiquidBottomTabs
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlin.math.roundToInt
+import com.vibecodegram.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 
 @Composable
@@ -565,6 +570,8 @@ private fun ProfileScreen(
         }
         Spacer(Modifier.height(10.dp))
         GlassCard(theme) {
+            ServerStatusCard(theme)
+            Divider(color = Color.White.copy(alpha = .08f))
             SettingsRow(Icons.Default.BookmarkBorder, "Сохранённое", theme)
             Divider(color = Color.White.copy(alpha = .08f))
             SettingsRow(Icons.Default.Lock, "Конфиденциальность", theme)
@@ -652,6 +659,42 @@ private fun ProfileStat(value: String, label: String, theme: Palette) {
 }
 
 @Composable
+
+@Composable
+private fun ServerStatusCard(theme: Palette) {
+    var status by remember { mutableStateOf("Проверяем подключение…") }
+    var checking by remember { mutableStateOf(true) }
+    var healthy by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        checking = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = URL(BuildConfig.API_BASE_URL.trimEnd('/') + "/healthz").openConnection() as HttpURLConnection
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.requestMethod = "GET"
+                try {
+                    if (connection.responseCode == 200) "Сервер доступен" else "Ответ сервера: HTTP ${connection.responseCode}"
+                } finally { connection.disconnect() }
+            }.getOrElse { "Сервер пока недоступен" }
+        }
+        status = result
+        healthy = result == "Сервер доступен"
+        checking = false
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Cloud, null, tint = theme.accent, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Сервер vibecodeGram", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(BuildConfig.API_BASE_URL, color = theme.secondary, fontSize = 10.sp)
+            Text(status, color = if (healthy == true) Color(0xFF65D6B0) else theme.secondary, fontSize = 11.sp)
+        }
+        if (checking) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
+        else Icon(if (healthy == true) Icons.Default.CheckCircle else Icons.Default.CloudOff, null, tint = if (healthy == true) Color(0xFF65D6B0) else theme.secondary)
+    }
+}
+
 private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, theme: Palette) {
     Row(Modifier.fillMaxWidth().clickable { }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = theme.accent, modifier = Modifier.size(19.dp))
