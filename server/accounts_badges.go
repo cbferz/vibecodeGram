@@ -117,7 +117,13 @@ func (a *App) subscriptionWebhook(w http.ResponseWriter,r *http.Request) {
  premium:=in.Tier!="none"
  if _,err=tx.ExecContext(r.Context(),"UPDATE users SET is_premium=$1,premium_tier=$2 WHERE id=$3",premium,in.Tier,target); err!=nil { fail(w,404,"user not found"); return }
  if _,err=tx.ExecContext(r.Context(),"DELETE FROM user_badges WHERE user_id=$1 AND badge_code IN ('premium','premium_plus','premium_elite')",target); err!=nil { fail(w,500,"could not update premium badges"); return }
- if premium { if _,err=tx.ExecContext(r.Context(),"INSERT INTO user_badges(user_id,badge_code) VALUES($1,'premium'),($1,$2)",target,in.Tier); err!=nil { fail(w,500,"could not assign premium badges"); return } }
+ if premium {
+ if in.Tier=="premium" {
+  if _,err=tx.ExecContext(r.Context(),"INSERT INTO user_badges(user_id,badge_code) VALUES($1,'premium')",target); err!=nil { fail(w,500,"could not assign premium badge"); return }
+ } else {
+  if _,err=tx.ExecContext(r.Context(),"INSERT INTO user_badges(user_id,badge_code) VALUES($1,'premium'),($1,$2)",target,in.Tier); err!=nil { fail(w,500,"could not assign premium badges"); return }
+ }
+}
  if err=tx.Commit(); err!=nil { fail(w,500,"could not update subscription"); return }
  writeJSON(w,200,map[string]any{"updated":true,"user_id":target,"tier":in.Tier,"is_premium":premium})
 }
