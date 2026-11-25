@@ -1,7 +1,6 @@
 package com.vibecodegram
 
 import android.os.Bundle
-import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.Animatable
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -37,9 +37,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +58,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.shapes.Capsule
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val Night = Color(0xFF080B12)
@@ -81,11 +82,6 @@ class MainActivity : ComponentActivity() {
 private fun VibeCodeGramApp() {
     var selected by remember { mutableIntStateOf(0) }
     val backdrop = rememberLayerBackdrop()
-    // Huawei's Mali/EMUI rendering path benefits from a lighter glass profile.
-    val isHuawei = remember {
-        Build.MANUFACTURER.equals("HUAWEI", ignoreCase = true) ||
-            Build.BRAND.equals("HUAWEI", ignoreCase = true)
-    }
     val items = listOf(
         NavDestination("Лента", Icons.Default.Home, "Твоя лента"),
         NavDestination("Чаты", Icons.Default.ChatBubble, "Сообщения"),
@@ -103,7 +99,6 @@ private fun VibeCodeGramApp() {
                     selectedIndex = selected,
                     onSelected = { selected = it },
                     backdrop = backdrop,
-                    isHuawei = isHuawei,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 12.dp)
@@ -198,12 +193,10 @@ private fun LiquidGlassNavigationBar(
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
     backdrop: Backdrop,
-    isHuawei: Boolean,
     modifier: Modifier = Modifier
 ) {
     val indicator = remember { Animatable(selectedIndex.toFloat()) }
-    var dragPosition by remember { mutableFloatStateOf(selectedIndex.toFloat()) }
-    var isDragging by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(selectedIndex) {
         indicator.animateTo(
@@ -222,12 +215,8 @@ private fun LiquidGlassNavigationBar(
                     shape = { Capsule() },
                     effects = {
                         vibrancy()
-                        blur(if (isHuawei) 5.dp.toPx() else 10.dp.toPx())
-                        lens(
-                            if (isHuawei) 15.dp.toPx() else 22.dp.toPx(),
-                            if (isHuawei) 20.dp.toPx() else 28.dp.toPx(),
-                            depthEffect = !isHuawei
-                        )
+                        blur(10.dp.toPx())
+                        lens(22.dp.toPx(), 28.dp.toPx(), depthEffect = true)
                     },
                     onDrawSurface = { drawRect(Color(0xB8182636)) }
                 )
@@ -239,24 +228,16 @@ private fun LiquidGlassNavigationBar(
 
             Box(
                 modifier = Modifier
+                    .offset(x = tabWidth * indicator.value)
                     .size(width = tabWidth, height = maxHeight)
-                    .graphicsLayer {
-                        // Keep the high-frequency drag/animation value in the layer phase.
-                        translationX = tabWidthPx * (if (isDragging) dragPosition else indicator.value)
-                    }
                     .padding(2.dp)
                     .drawBackdrop(
                         backdrop = backdrop,
                         shape = { Capsule() },
                         effects = {
                             vibrancy()
-                            if (!isHuawei) blur(2.dp.toPx())
-                            lens(
-                                if (isHuawei) 8.dp.toPx() else 12.dp.toPx(),
-                                if (isHuawei) 14.dp.toPx() else 22.dp.toPx(),
-                                chromaticAberration = !isHuawei,
-                                depthEffect = !isHuawei
-                            )
+                            blur(2.dp.toPx())
+                            lens(12.dp.toPx(), 22.dp.toPx(), chromaticAberration = true)
                         },
                         onDrawSurface = {
                             drawRect(Color.White.copy(alpha = .12f))
@@ -278,24 +259,25 @@ private fun LiquidGlassNavigationBar(
                             .clip(Capsule())
                             .pointerInput(index, tabWidthPx) {
                                 detectDragGestures(
-                                    onDragStart = {
-                                        dragPosition = indicator.value
-                                        isDragging = true
-                                    },
                                     onDragEnd = {
-                                        val target = dragPosition.roundToInt().coerceIn(items.indices)
-                                        isDragging = false
-                                        onSelected(target)
+                                        val target = indicator.value.roundToInt().coerceIn(items.indices)
+                                        scope.launch {
+                                            indicator.animateTo(target.toFloat(), spring(dampingRatio = .68f, stiffness = 420f))
+                                            onSelected(target)
+                                        }
                                     },
-                                    onDragCancel = { isDragging = false },
+                                    onDragCancel = {
+                                        scope.launch { indicator.animateTo(selectedIndex.toFloat(), spring()) }
+                                    },
                                     onDrag = { change, amount ->
                                         change.consume()
-                                        dragPosition = (dragPosition + amount.x / tabWidthPx)
+                                        val next = (indicator.value + amount.x / tabWidthPx)
                                             .coerceIn(0f, items.lastIndex.toFloat())
+                                        scope.launch { indicator.snapTo(next) }
                                     }
                                 )
                             }
-                            .clickable { isDragging = false; onSelected(index) },
+                            .clickable { onSelected(index) },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
