@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -299,4 +298,3 @@ func (a *App) runAI(w http.ResponseWriter, r *http.Request, in aiChatInput, task
 	fail(w, lastStatus, lastErr)
 }
 
-var _ = strconv.IntSize
