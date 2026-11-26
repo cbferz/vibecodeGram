@@ -275,6 +275,7 @@ func (a *App) searchUsers(w http.ResponseWriter, r *http.Request) {
 	if len(q) < 2 || len(q) > 32 { fail(w, 400, "search query must be 2-32 characters"); return }
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,username,display_name FROM users
 		WHERE id<>$1 AND (username ILIKE $2 OR display_name ILIKE $2)
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=users.id) OR (b.blocker_id=users.id AND b.blocked_id=$1))
 		ORDER BY CASE WHEN username ILIKE $3 THEN 0 ELSE 1 END, username LIMIT 30`, uid(r), "%"+q+"%", q)
 	if err != nil { fail(w,500,"could not search users"); return }
 	defer rows.Close()
