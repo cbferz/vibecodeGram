@@ -323,6 +323,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
                         post = post,
                         theme = theme,
                         compact = compact,
+                        api = api,
                         onLike = {
                             scope.launch {
                                 runCatching { api.toggleLike(post.id) }.onSuccess { result ->
@@ -415,6 +416,7 @@ private fun FeedPostCard(
     post: ApiPost,
     theme: Palette,
     compact: Boolean,
+    api: ApiClient,
     onLike: () -> Unit,
     onSave: () -> Unit,
     onHide: () -> Unit
