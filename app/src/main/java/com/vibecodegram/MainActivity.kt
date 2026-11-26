@@ -332,12 +332,12 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
         loading = false
     }
 
-    LaunchedEffect(pagerState.currentPage, posts.size, loadingMore) {
+    LaunchedEffect(pagerState.currentPage, posts.size) {
         if (posts.isNotEmpty() && !loadingMore && pagerState.currentPage >= posts.size - 4) {
             loadingMore = true
             runCatching { api.reels(posts.size, 20) }
                 .onSuccess { next ->
-                    val unique = next.filter { it.contentKind == "reel" && it.videoUrl.isNotBlank() && item -> posts.none { old -> old.id == item.id } }
+                    val unique = next.filter { item -> item.contentKind == "reel" && item.videoUrl.isNotBlank() && posts.none { old -> old.id == item.id } }
                     if (unique.isNotEmpty()) posts = posts + unique
                 }
                 .onFailure { if (posts.isEmpty()) error = it.message }
