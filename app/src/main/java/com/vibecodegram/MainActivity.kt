@@ -342,7 +342,7 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                         factory = { ctx ->
                             VideoView(ctx).apply {
                                 setVideoURI(Uri.parse(videoUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
-                                setOnPreparedListener { player -> player.isLooping = true; start() }
+                                setOnPreparedListener { player -> player.isLooping = true; if (index == pagerState.currentPage) start() }
                                 setOnErrorListener { _, _, _ -> true }
                             }
                         },
@@ -593,21 +593,24 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
             else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 if (users.isNotEmpty()) item { Text("Пользователи", color = theme.accent, fontWeight = FontWeight.Bold) }
                 items(users, key = { "u${it.id}" }) { user ->
-                    GlassCard(theme, modifier = Modifier.clickable {
-                        scope.launch {
-                            runCatching { api.createDirectConversation(user.id) }.onSuccess { id ->
-                                onOpenChat(Chat(user.displayName.ifBlank { user.username }, "@${user.username}", "", 0, false, false, id))
-                            }
-                        }
-                    }) {
+                    var followed by remember(user.id) { mutableStateOf(false) }
+                    GlassCard(theme) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Avatar(user.displayName.ifBlank { user.username }.take(1), theme.accent, 42)
                             Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
+                            Column(Modifier.weight(1f).clickable {
+                                scope.launch {
+                                    runCatching { api.createDirectConversation(user.id) }.onSuccess { id ->
+                                        onOpenChat(Chat(user.displayName.ifBlank { user.username }, "@${user.username}", "", 0, false, false, id))
+                                    }
+                                }
+                            }) {
                                 Text(user.displayName.ifBlank { user.username }, color = Color.White, fontWeight = FontWeight.SemiBold)
                                 Text("@${user.username}", color = theme.secondary, fontSize = 11.sp)
                             }
-                            Text("Написать", color = theme.accent, fontSize = 11.sp)
+                            TextButton(onClick = {
+                                scope.launch { runCatching { api.followUser(user.id, !followed) }.onSuccess { followed = !followed } }
+                            }) { Text(if (followed) "Вы подписаны" else "Подписаться", color = theme.accent, fontSize = 10.sp) }
                         }
                     }
                 }
@@ -652,7 +655,7 @@ private fun NotificationsScreen(theme: Palette, api: ApiClient) {
                             Avatar(item.displayName.ifBlank { item.username }.take(1), theme.accent, 42)
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                val action = when (item.kind) { "follow" -> "подписался на тебя"; "comment" -> "прокомментировал твою публикацию"; "like" -> "оценил твою публикацию"; else -> "есть новое событие" }
+                                val action = when (item.kind) { "follow" -> "подписался на тебя"; "comment" -> "прокомментировал твою публикацию"; "like" -> "оценил твою публикацию"; "message" -> "отправил тебе сообщение"; else -> "есть новое событие" }
                                 Text("${item.displayName.ifBlank { "@${item.username}" }} $action", color = Color.White, fontSize = 13.sp)
                                 Text(item.createdAt.replace("T", " ").take(16), color = theme.secondary, fontSize = 10.sp)
                             }
