@@ -656,14 +656,23 @@ private fun ProfileScreen(
     var savedPosts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
     var savedLoading by remember { mutableStateOf(true) }
     var savedError by remember { mutableStateOf<String?>(null) }
+    var hiddenPosts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var hiddenLoading by remember { mutableStateOf(true) }
+    var hiddenError by remember { mutableStateOf<String?>(null) }
     val savedScope = rememberCoroutineScope()
     LaunchedEffect(api.token) {
         savedLoading = true
+        hiddenLoading = true
         savedError = null
+        hiddenError = null
         runCatching { api.posts("saved") }
             .onSuccess { savedPosts = it }
             .onFailure { savedError = it.message ?: "Не удалось загрузить избранное" }
+        runCatching { api.posts("hidden") }
+            .onSuccess { hiddenPosts = it }
+            .onFailure { hiddenError = it.message ?: "Не удалось загрузить скрытые публикации" }
         savedLoading = false
+        hiddenLoading = false
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(8.dp))
@@ -757,6 +766,74 @@ private fun ProfileScreen(
                     }
                 }
             )
+        }
+        Spacer(Modifier.height(14.dp))
+        GlassCard(theme) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.VisibilityOff, null, tint = theme.accent)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Скрытые публикации", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Посты, которые ты убрал из своей ленты", color = theme.secondary, fontSize = 11.sp)
+                }
+                IconButton(onClick = {
+                    savedScope.launch {
+                        hiddenLoading = true
+                        hiddenError = null
+                        runCatching { api.posts("hidden") }
+                            .onSuccess { hiddenPosts = it }
+                            .onFailure { hiddenError = it.message ?: "Не удалось обновить скрытые публикации" }
+                        hiddenLoading = false
+                    }
+                }, enabled = !hiddenLoading) {
+                    Icon(Icons.Default.Refresh, "Обновить скрытые публикации", tint = theme.accent)
+                }
+            }
+            when {
+                hiddenLoading -> Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = theme.accent)
+                }
+                hiddenError != null -> Text(hiddenError!!, color = Color(0xFFFF8294), fontSize = 12.sp)
+                hiddenPosts.isEmpty() -> Text("Скрытых публикаций пока нет.", color = theme.secondary, fontSize = 12.sp)
+                else -> Text("Скрыто: ${hiddenPosts.size}", color = theme.secondary, fontSize = 11.sp)
+            }
+        }
+        hiddenPosts.forEach { hiddenPost ->
+            Spacer(Modifier.height(8.dp))
+            FeedPostCard(
+                post = hiddenPost,
+                theme = theme,
+                compact = false,
+                onLike = {
+                    savedScope.launch {
+                        runCatching { api.toggleLike(hiddenPost.id) }.onSuccess { result ->
+                            hiddenPosts = hiddenPosts.map { if (it.id == hiddenPost.id) it.copy(liked = result.first, likes = result.second) else it }
+                        }.onFailure { hiddenError = it.message ?: "Не удалось поставить отметку" }
+                    }
+                },
+                onSave = {
+                    savedScope.launch {
+                        runCatching { api.setSaved(hiddenPost.id, !hiddenPost.saved) }.onSuccess {
+                            hiddenPosts = hiddenPosts.map { if (it.id == hiddenPost.id) it.copy(saved = !it.saved) else it }
+                        }.onFailure { hiddenError = it.message ?: "Не удалось изменить сохранение" }
+                    }
+                },
+                onHide = { }
+            )
+            TextButton(
+                onClick = {
+                    savedScope.launch {
+                        runCatching { api.unhidePost(hiddenPost.id) }.onSuccess {
+                            hiddenPosts = hiddenPosts.filterNot { it.id == hiddenPost.id }
+                        }.onFailure { hiddenError = it.message ?: "Не удалось вернуть публикацию" }
+                    }
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Icon(Icons.Default.Visibility, null, tint = theme.accent, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Вернуть в ленту", color = theme.accent)
+            }
         }
         Spacer(Modifier.height(12.dp))
         GlassCard(theme) {
