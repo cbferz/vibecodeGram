@@ -28,7 +28,8 @@ data class ApiPost(
     val saved: Boolean,
     val videoUrl: String = "",
     val mediaType: String = "",
-    val mediaSize: Long = 0L
+    val mediaSize: Long = 0L,
+    val contentKind: String = "post"
 )
 data class AuthResult(val token: String, val user: ApiUser)
 data class ApiStory(val id: Long, val authorId: Long, val username: String, val displayName: String, val caption: String, val mediaType: String, val expiresAt: String, val viewed: Boolean, val mediaUrl: String)
@@ -90,18 +91,30 @@ class ApiClient(private val prefs: SharedPreferences) {
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
             ApiPost(p.getLong("id"), p.getLong("author_id"), p.optString("username"), p.optString("display_name"),
                 p.optString("body"), p.optString("tag"), p.optString("created_at"), p.optLong("likes"), p.optBoolean("liked"), p.optBoolean("saved"),
-                p.optString("video_url"), p.optString("media_type"), p.optLong("media_size"))
+                p.optString("video_url"), p.optString("media_type"), p.optLong("media_size"), p.optString("content_kind", "post"))
         } }
     }
-    suspend fun createPost(body: String, tag: String, videoUri: Uri? = null, context: Context? = null) {
+    suspend fun reels(offset: Int = 0, limit: Int = 20): List<ApiPost> {
+        val safeOffset = offset.coerceAtLeast(0)
+        val safeLimit = limit.coerceIn(1, 30)
+        val arr = JSONArray(call("GET", "/v1/reels?limit=$safeLimit&offset=$safeOffset"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
+            ApiPost(p.getLong("id"), p.getLong("author_id"), p.optString("username"), p.optString("display_name"),
+                p.optString("body"), p.optString("tag"), p.optString("created_at"), p.optLong("likes"),
+                p.optBoolean("liked"), p.optBoolean("saved"), p.optString("video_url"),
+                p.optString("media_type"), p.optLong("media_size"), p.optString("content_kind", "reel"))
+        } }
+    }
+    suspend fun createPost(body: String, tag: String, videoUri: Uri? = null, context: Context? = null, isReel: Boolean = false) {
         if (videoUri == null) {
+            require(!isReel) { "Для Reels нужно выбрать видео MP4" }
             call("POST", "/v1/posts", JSONObject().put("body", body).put("tag", tag))
             return
         }
         val appContext = context ?: throw IllegalArgumentException("Context is required for video upload")
         withContext(Dispatchers.IO) {
             val boundary = "vibecodegram-${UUID.randomUUID().toString().replace("-", "")}"
-            val connection = (URL("$base/v1/posts/video").openConnection() as HttpURLConnection).apply {
+            val connection = (URL("$base${if (isReel) "/v1/reels/video" else "/v1/posts/video"}").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
                 readTimeout = 120000
