@@ -12,6 +12,15 @@ on:
       - 'gradle.properties'
       - 'settings.gradle.kts'
       - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '**/*.gradle'
+      - '**/*.gradle.kts'
+      - 'gradle.properties'
+      - 'settings.gradle.kts'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 concurrency:
