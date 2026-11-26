@@ -108,13 +108,13 @@ class ApiClient(private val prefs: SharedPreferences) {
             try {
                 DataOutputStream(connection.outputStream).use { output ->
                     output.writeBytes("--$boundary\r\n")
-                    output.writeBytes("Content-Disposition: form-data; name=\\"body\\"\r\n\r\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\"body\"\r\n\r\n")
                     output.write(body.toByteArray(Charsets.UTF_8))
                     output.writeBytes("\r\n--$boundary\r\n")
-                    output.writeBytes("Content-Disposition: form-data; name=\\"tag\\"\r\n\r\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\"tag\"\r\n\r\n")
                     output.write(tag.toByteArray(Charsets.UTF_8))
                     output.writeBytes("\r\n--$boundary\r\n")
-                    output.writeBytes("Content-Disposition: form-data; name=\\"video\\"; filename=\\"upload.mp4\\"\r\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\"video\"; filename=\"upload.mp4\"\r\n")
                     output.writeBytes("Content-Type: video/mp4\r\n\r\n")
                     val input = appContext.contentResolver.openInputStream(videoUri)
                         ?: throw IllegalStateException("Не удалось открыть выбранное видео")
