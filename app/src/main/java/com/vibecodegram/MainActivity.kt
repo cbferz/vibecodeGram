@@ -863,7 +863,7 @@ private fun FeedPostCard(
     onLike: () -> Unit,
     onSave: () -> Unit,
     onHide: () -> Unit,
-    onBlock: () -> Unit = {}
+    onBlock: (() -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var reportDialog by remember { mutableStateOf(false) }
@@ -896,11 +896,13 @@ private fun FeedPostCard(
                         leadingIcon = { Icon(Icons.Default.Flag, null, tint = theme.secondary) },
                         onClick = { menuExpanded = false; reportDialog = true }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Заблокировать автора", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Block, null, tint = theme.secondary) },
-                        onClick = { menuExpanded = false; onBlock() }
-                    )
+                    if (onBlock != null) {
+                        DropdownMenuItem(
+                            text = { Text("Заблокировать автора", color = Color.White) },
+                            leadingIcon = { Icon(Icons.Default.Block, null, tint = theme.secondary) },
+                            onClick = { menuExpanded = false; onBlock() }
+                        )
+                    }
                 }
             }
         }
