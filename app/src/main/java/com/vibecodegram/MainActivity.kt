@@ -60,6 +60,7 @@ import kotlin.math.roundToInt
 import com.vibecodegram.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -137,7 +138,7 @@ private val palettes = listOf(
 private val accents = listOf(Color(0xFFE6EAF2), Color(0xFF69C9FF), Color(0xFFC5A0FF), Color(0xFF68E0B0), Color(0xFFFF9E8B), Color(0xFFFFD166), Color(0xFFFF79B0), Color(0xFF83E8E8))
 
 private data class Destination(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String)
-private data class Chat(val name: String, val message: String, val time: String, val unread: Int, val online: Boolean, val group: Boolean = false)
+private data class Chat(val name: String, val message: String, val time: String, val unread: Int, val online: Boolean, val group: Boolean = false, val id: Long = -1L)
 private data class Post(val author: String, val handle: String, val time: String, val text: String, val tag: String, val likes: Int)
 private data class LocalChatMessage(val id: Long, val text: String, val time: String, val outgoing: Boolean)
 
@@ -207,7 +208,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
                         0 -> FeedScreen(theme, compact, 0.dp, prefs)
-                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp)
+                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
                         2 -> VideosScreen(theme, 0.dp)
                         3 -> ExploreScreen(theme, search, { search = it }, 0.dp)
                         else -> ProfileScreen(
@@ -241,7 +242,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                 onClose = { editor = false }
             )
         }
-        openedChat?.let { ChatRoomDialog(it, theme, prefs) { openedChat = null } }
+        openedChat?.let { ChatRoomDialog(it, theme, api, currentUser?.id ?: -1L) { openedChat = null } }
         }
         }
     }
@@ -375,45 +376,35 @@ private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.c
 }
 
 @Composable
-private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean, onOpenChat: (Chat) -> Unit, bottomInset: androidx.compose.ui.unit.Dp) {
-    val chats = listOf(
-        Chat("Лера", "Отправила фотографию", "21:14", 2, true),
-        Chat("Разработка vibecodeGram", "Алекс: залил новый интерфейс", "20:58", 5, true, true),
-        Chat("Миша", "Окей, договорились", "19:42", 0, false),
-        Chat("Избранное", "Твои сохранённые сообщения", "Вчера", 0, false),
-        Chat("Дизайн-команда", "Новый вариант палитры готов", "Вт", 0, false, true)
-    )
-    OutlinedTextField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), placeholder = { Text("Поиск по чатам и сообщениям") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp), colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.White.copy(alpha = .12f), focusedBorderColor = theme.accent, unfocusedTextColor = Color.White, focusedTextColor = Color.White))
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        listOf("Все", "Личные", "Группы", "Непрочитанные").forEach { label ->
-            FilterChip(selected = folder == label, onClick = { onFolder(label) }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
+private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Unit, folder: String, onFolder: (String) -> Unit, compact: Boolean, onOpenChat: (Chat) -> Unit, bottomInset: androidx.compose.ui.unit.Dp, api: ApiClient) {
+    var chats by remember { mutableStateOf<List<Chat>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(api.token) {
+        loading=true; error=null
+        runCatching { api.conversations() }
+            .onSuccess { rows -> chats=rows.map { Chat(it.title.ifBlank { "Диалог #${it.id}" },it.lastMessage.ifBlank { "Пока нет сообщений" },"",0,false,it.kind=="group",it.id) } }
+            .onFailure { error=it.message ?: "Не удалось загрузить чаты" }
+        loading=false
+    }
+    OutlinedTextField(value=search,onValueChange=onSearch,modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp),placeholder={Text("Поиск по чатам")},leadingIcon={Icon(Icons.Default.Search,null)},singleLine=true,shape=RoundedCornerShape(18.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color.White.copy(alpha=.12f),focusedBorderColor=theme.accent,unfocusedTextColor=Color.White,focusedTextColor=Color.White))
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp,vertical=10.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+        listOf("Все","Личные","Группы").forEach { label ->
+            FilterChip(selected=folder==label,onClick={onFolder(label)},label={Text(label)},colors=FilterChipDefaults.filterChipColors(selectedContainerColor=theme.accent.copy(alpha=.20f),selectedLabelColor=theme.accent))
         }
     }
-    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 9.dp)) {
-        items(chats.filter { it.name.contains(search, true) || it.message.contains(search, true) }.filter { folder == "Все" || folder == "Непрочитанные" && it.unread > 0 || folder == "Группы" && it.group || folder == "Личные" && !it.group }) { chat ->
-            var menu by remember { mutableStateOf(false) }
-            GlassCard(theme, compact, Modifier.combinedClickable(onClick = { onOpenChat(chat) }, onLongClick = { menu = true })) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box {
-                        Avatar(chat.name.take(1), theme.accent, 48)
-                        if (chat.online) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).background(Color(0xFF55D69A), CircleShape).border(2.dp, theme.surface, CircleShape))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(chat.name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(chat.message, color = theme.secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(chat.time, color = theme.secondary, fontSize = 10.sp)
-                        if (chat.unread > 0) Box(Modifier.padding(top = 5.dp).clip(CircleShape).background(theme.accent).padding(horizontal = 7.dp, vertical = 3.dp)) { Text(chat.unread.toString(), color = theme.background, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                    }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, null, tint = theme.secondary) }
-                        GlassPopupMenu(expanded = menu, onDismissRequest = { menu = false }, theme = theme) {
-                            GlassMenuItem(Icons.Default.PushPin, "Закрепить", theme) { menu = false }
-                            GlassMenuItem(Icons.Default.Archive, "В архив", theme) { menu = false }
-                            GlassMenuItem(Icons.Default.NotificationsOff, "Отключить уведомления", theme) { menu = false }
-                        }
+    when {
+        loading -> Box(Modifier.fillMaxWidth().weight(1f),contentAlignment=Alignment.Center){CircularProgressIndicator(color=theme.accent)}
+        error!=null -> Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(error!!,color=theme.secondary,textAlign=androidx.compose.ui.text.style.TextAlign.Center);TextButton(onClick={}){Text("Повтори загрузку",color=theme.accent)}}
+        else -> LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=16.dp,top=4.dp,bottom=12.dp+bottomInset),verticalArrangement=Arrangement.spacedBy(if(compact)5.dp else 9.dp)) {
+            val filtered=chats.filter{it.name.contains(search,true)||it.message.contains(search,true)}.filter{folder=="Все"||(folder=="Группы"&&it.group)||(folder=="Личные"&&!it.group)}
+            if(filtered.isEmpty()) item { Text("Чатов пока нет. Начни диалог, когда появится поиск пользователей.",color=theme.secondary,modifier=Modifier.fillMaxWidth().padding(28.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
+            items(filtered,key={it.id}) { chat ->
+                GlassCard(theme,compact,Modifier.clickable{onOpenChat(chat)}) {
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Avatar(chat.name.take(1),theme.accent,48);Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)){Text(chat.name,color=Color.White,fontWeight=FontWeight.SemiBold);Text(chat.message,color=theme.secondary,fontSize=12.sp,maxLines=1,overflow=TextOverflow.Ellipsis)}
+                        Icon(Icons.Default.ChevronRight,null,tint=theme.secondary)
                     }
                 }
             }
@@ -421,68 +412,51 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
     }
 }
 
-
 @Composable
-private fun ChatRoomDialog(chat: Chat, theme: Palette, prefs: android.content.SharedPreferences, onClose: () -> Unit) {
-    val key = "local_messages_" + chat.name.hashCode()
-    val messages = remember(chat.name) {
-        mutableStateListOf<LocalChatMessage>().apply {
-            runCatching {
-                val array = org.json.JSONArray(prefs.getString(key, "[]"))
-                for (i in 0 until array.length()) {
-                    val item = array.getJSONObject(i)
-                    add(LocalChatMessage(item.optLong("id", i.toLong()), item.optString("text"), item.optString("time"), item.optBoolean("outgoing")))
-                }
-            }
-            if (isEmpty()) add(LocalChatMessage(1L, chat.message, chat.time, false))
-        }
+private fun ChatRoomDialog(chat: Chat, theme: Palette, api: ApiClient, currentUserId: Long, onClose: () -> Unit) {
+    var messages by remember(chat.id) { mutableStateOf<List<ApiMessage>>(emptyList()) }
+    var draft by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
+    var sending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope=rememberCoroutineScope()
+    suspend fun refresh() {
+        runCatching { api.messages(chat.id) }.onSuccess { messages=it;error=null }.onFailure { error=it.message ?: "Не удалось загрузить сообщения" }
+        loading=false
     }
-    var draft by remember(chat.name) { mutableStateOf("") }
-    fun saveMessages() {
-        val array = org.json.JSONArray()
-        messages.forEach { m -> array.put(org.json.JSONObject().put("id",m.id).put("text",m.text).put("time",m.time).put("outgoing",m.outgoing)) }
-        prefs.edit().putString(key,array.toString()).apply()
-    }
-    Dialog(onDismissRequest = onClose) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f).liquidGlass(theme, RoundedCornerShape(24.dp), .94f), shape = RoundedCornerShape(24.dp), color = Color.Transparent, tonalElevation = 0.dp) {
+    LaunchedEffect(chat.id) { refresh() }
+    Dialog(onDismissRequest=onClose) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f).liquidGlass(theme,RoundedCornerShape(24.dp),.94f),shape=RoundedCornerShape(24.dp),color=Color.Transparent,tonalElevation=0.dp) {
             Column(Modifier.fillMaxSize().padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(chat.name.take(1),theme.accent,42)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(chat.name,color=Color.White,fontWeight=FontWeight.Bold)
-                        Text(if(chat.online) "в сети" else "был(а) недавно",color=theme.secondary,fontSize=11.sp)
-                    }
-                    IconButton(onClick=onClose) { Icon(Icons.Default.Close,"Закрыть",tint=theme.secondary) }
-                }
+                Row(verticalAlignment=Alignment.CenterVertically){Avatar(chat.name.take(1),theme.accent,42);Spacer(Modifier.width(10.dp));Text(chat.name,color=Color.White,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));IconButton(onClick=onClose){Icon(Icons.Default.Close,"Закрыть",tint=theme.secondary)}}
                 Divider(color=Color.White.copy(alpha=.1f))
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                if(loading) Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center){CircularProgressIndicator(color=theme.accent)}
+                else LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    if(messages.isEmpty()) item { Text("Сообщений пока нет. Напиши первым.",color=theme.secondary,modifier=Modifier.fillMaxWidth().padding(24.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
                     items(messages,key={it.id}) { m ->
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=if(m.outgoing) Arrangement.End else Arrangement.Start) {
-                            Column(Modifier.widthIn(max=280.dp).liquidGlass(theme, RoundedCornerShape(16.dp), if (m.outgoing) .58f else .82f).padding(12.dp)) {
-                                Text(m.text,color=Color.White,fontSize=14.sp,lineHeight=19.sp)
-                                Text(m.time,color=theme.secondary,fontSize=9.sp,modifier=Modifier.align(Alignment.End))
+                        val outgoing=m.senderId==currentUserId
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=if(outgoing)Arrangement.End else Arrangement.Start) {
+                            Column(Modifier.widthIn(max=280.dp).liquidGlass(theme,RoundedCornerShape(16.dp),if(outgoing).58f else .82f).padding(12.dp)) {
+                                if(!outgoing) Text(m.username,color=theme.accent,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                                Text(m.body,color=Color.White,fontSize=14.sp,lineHeight=19.sp)
+                                Text(m.createdAt.replace("T"," ").take(16),color=theme.secondary,fontSize=9.sp,modifier=Modifier.align(Alignment.End))
                             }
                         }
                     }
                 }
+                if(error!=null) Text(error!!,color=Color(0xFFFF8294),fontSize=11.sp)
                 Row(verticalAlignment=Alignment.CenterVertically) {
                     OutlinedTextField(value=draft,onValueChange={draft=it},modifier=Modifier.weight(1f),placeholder={Text("Сообщение…")},shape=RoundedCornerShape(18.dp),maxLines=4)
-                    IconButton(onClick={
-                        val value=draft.trim()
-                        if(value.isNotEmpty()) {
-                            val now=java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date())
-                            messages.add(LocalChatMessage((messages.maxOfOrNull{it.id} ?: 0L)+1L,value,now,true))
-                            draft=""
-                            saveMessages()
-                        }
-                    },enabled=draft.isNotBlank()) { Icon(Icons.Default.Send,"Отправить",tint=theme.accent) }
+                    IconButton(enabled=draft.isNotBlank()&&!sending,onClick={
+                        val body=draft.trim();sending=true
+                        scope.launch { runCatching { api.sendMessage(chat.id,body) }.onSuccess { draft="";refresh() }.onFailure { error=it.message ?: "Не удалось отправить сообщение" };sending=false }
+                    }) { if(sending) CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp,color=theme.accent) else Icon(Icons.Default.Send,"Отправить",tint=theme.accent) }
                 }
-                Text("Демо-режим: переписка хранится локально на устройстве и не отправляется собеседнику.",color=theme.secondary,fontSize=9.sp,modifier=Modifier.padding(top=6.dp))
             }
         }
     }
 }
+
 
 @Composable
 private fun VideosScreen(theme: Palette, bottomInset: androidx.compose.ui.unit.Dp) {
