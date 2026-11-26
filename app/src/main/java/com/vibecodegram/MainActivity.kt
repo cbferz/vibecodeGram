@@ -1315,7 +1315,7 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
                         appendLine("Android API: ${Build.VERSION.SDK_INT}")
                         appendLine("Версия: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                         appendLine("Последний этап: $stage")
-                        if (detail.isNotBlank()) appendLine("Детали: $detail")
+                        if (!detail.isNullOrBlank()) appendLine("Детали: $detail")
                         if (stageTime > 0L) appendLine("Время: ${java.util.Date(stageTime)}")
                     }
                 }
