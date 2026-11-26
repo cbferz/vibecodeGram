@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 data class ApiUser(val id: Long, val username: String, val displayName: String)
 data class ApiConversation(val id: Long, val kind: String, val title: String, val lastMessage: String)
 data class ApiMessage(val id: Long, val senderId: Long, val username: String, val body: String, val createdAt: String)
+data class ApiPost(val id: Long, val authorId: Long, val username: String, val displayName: String, val body: String, val tag: String, val createdAt: String, val likes: Long, val liked: Boolean, val saved: Boolean)
 data class AuthResult(val token: String, val user: ApiUser)
 
 class ApiClient(private val prefs: SharedPreferences) {
@@ -60,6 +61,26 @@ class ApiClient(private val prefs: SharedPreferences) {
     }
     suspend fun sessions(): JSONArray = JSONObject(call("GET", "/v1/sessions")).optJSONArray("sessions") ?: JSONArray()
     suspend fun revokeSession(id: String) { call("DELETE", "/v1/sessions/$id") }
+    suspend fun posts(sort: String = "latest"): List<ApiPost> {
+        val arr = JSONArray(call("GET", "/v1/posts?sort=$sort"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
+            ApiPost(p.getLong("id"), p.getLong("author_id"), p.optString("username"), p.optString("display_name"),
+                p.optString("body"), p.optString("tag"), p.optString("created_at"), p.optLong("likes"), p.optBoolean("liked"), p.optBoolean("saved"))
+        } }
+    }
+    suspend fun createPost(body: String, tag: String) {
+        call("POST", "/v1/posts", JSONObject().put("body", body).put("tag", tag))
+    }
+    suspend fun toggleLike(postId: Long): Pair<Boolean, Long> {
+        val p = JSONObject(call("POST", "/v1/posts/$postId/like", JSONObject()))
+        return p.optBoolean("liked") to p.optLong("likes")
+    }
+    suspend fun setSaved(postId: Long, saved: Boolean) {
+        call(if (saved) "PUT" else "DELETE", "/v1/posts/$postId/save", if (saved) JSONObject() else null)
+    }
+    suspend fun hidePost(postId: Long) {
+        call("POST", "/v1/posts/$postId/hide", JSONObject())
+    }
     suspend fun conversations(): List<ApiConversation> {
         val arr = JSONArray(call("GET", "/v1/conversations"))
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { ApiConversation(it.getLong("id"), it.optString("kind"), it.optString("title"), it.optString("last_message")) } }
