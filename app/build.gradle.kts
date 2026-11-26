@@ -16,10 +16,7 @@ android {
         versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
         versionName = "0.4.0"
         buildConfigField("String", "API_BASE_URL", "\"https://api.vibecodegram.tendercheck.pro\"")
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
-        externalNativeBuild { cmake { cppFlags += listOf("-std=c++20") } }
     }
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     signingConfigs {
         create("release") {
             storeFile = System.getenv("ANDROID_KEYSTORE_PATH")?.let { file(it) }
