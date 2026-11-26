@@ -48,7 +48,7 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 		whereVideo = " AND v.post_id IS NOT NULL"
 	}
 	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
-		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id),
+		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id) AS likes_count,
 		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
 		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
 		v.mime_type,v.byte_size
@@ -101,32 +101,64 @@ const maxPostVideoBytes int64 = 50 << 20
 
 func (a *App) createVideoPost(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxPostVideoBytes+(2<<20))
-	if err := r.ParseMultipartForm(2 << 20); err != nil {
-		fail(w, 413, "video upload is too large or invalid")
-		return
-	}
-	body := strings.TrimSpace(r.FormValue("body"))
-	tag := strings.TrimSpace(strings.TrimPrefix(r.FormValue("tag"), "#"))
-	if len(body) > 5000 || len(tag) > 32 {
-		fail(w, 400, "post text must be at most 5000 characters and tag at most 32")
-		return
-	}
-	file, _, err := r.FormFile("video")
+	reader, err := r.MultipartReader()
 	if err != nil {
+		fail(w, 400, "multipart video upload is required")
+		return
+	}
+	body := ""
+	tag := ""
+	var data []byte
+	for {
+		part, nextErr := reader.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			fail(w, 400, "invalid video upload")
+			return
+		}
+		switch part.FormName() {
+		case "body":
+			value, readErr := io.ReadAll(io.LimitReader(part, 5001))
+			if readErr != nil || len(value) > 5000 {
+				_ = part.Close()
+				fail(w, 400, "post text must be at most 5000 characters")
+				return
+			}
+			body = strings.TrimSpace(string(value))
+		case "tag":
+			value, readErr := io.ReadAll(io.LimitReader(part, 33))
+			if readErr != nil || len(value) > 32 {
+				_ = part.Close()
+				fail(w, 400, "tag must be at most 32 characters")
+				return
+			}
+			tag = strings.TrimSpace(strings.TrimPrefix(string(value), "#"))
+		case "video":
+			if data != nil {
+				_ = part.Close()
+				fail(w, 400, "only one video file is allowed")
+				return
+			}
+			data, err = io.ReadAll(io.LimitReader(part, maxPostVideoBytes+1))
+			if err != nil {
+				_ = part.Close()
+				fail(w, 400, "could not read video")
+				return
+			}
+		}
+		_ = part.Close()
+	}
+	if len(data) == 0 {
 		fail(w, 400, "video file is required")
-		return
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxPostVideoBytes+1))
-	if err != nil {
-		fail(w, 400, "could not read video")
 		return
 	}
 	if len(data) < 12 || int64(len(data)) > maxPostVideoBytes {
 		fail(w, 413, "video must be a valid MP4 file up to 50 MB")
 		return
 	}
-	// MP4/QuickTime containers carry the ftyp box at bytes 4..8.
+	// MP4 containers carry the ftyp box at bytes 4..8.
 	if string(data[4:8]) != "ftyp" {
 		fail(w, 415, "only MP4 video files are supported")
 		return
