@@ -842,9 +842,13 @@ private fun FeedPostCard(
     api: ApiClient,
     onLike: () -> Unit,
     onSave: () -> Unit,
-    onHide: () -> Unit
+    onHide: () -> Unit,
+    onBlock: () -> Unit = {}
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var reportDialog by remember { mutableStateOf(false) }
+    var reportStatus by remember { mutableStateOf<String?>(null) }
+    val reportScope = rememberCoroutineScope()
     GlassCard(theme, compact) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(post.displayName.ifBlank { post.username }.take(1), theme.accent, 44)
@@ -866,6 +870,16 @@ private fun FeedPostCard(
                         text = { Text("Скрыть публикацию", color = Color.White) },
                         leadingIcon = { Icon(Icons.Default.VisibilityOff, null, tint = theme.secondary) },
                         onClick = { menuExpanded = false; onHide() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Пожаловаться", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Default.Flag, null, tint = theme.secondary) },
+                        onClick = { menuExpanded = false; reportDialog = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Заблокировать автора", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Default.Block, null, tint = theme.secondary) },
+                        onClick = { menuExpanded = false; onBlock() }
                     )
                 }
             }
@@ -902,6 +916,43 @@ private fun FeedPostCard(
                 Text(if (post.saved) "Сохранено" else "Сохранить", color = theme.secondary, fontSize = 12.sp)
             }
         }
+        reportStatus?.let { Text(it, color = theme.secondary, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp)) }
+    }
+    if (reportDialog) {
+        AlertDialog(
+            onDismissRequest = { reportDialog = false },
+            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+            containerColor = Color.Transparent,
+            title = { Text("Пожаловаться на публикацию", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Выбери причину:", color = theme.secondary)
+                    listOf(
+                        "Спам" to "spam",
+                        "Оскорбления или травля" to "harassment",
+                        "Насилие" to "violence",
+                        "Дезинформация" to "misinformation",
+                        "Нарушение авторских прав" to "copyright",
+                        "Другое" to "other"
+                    ).forEach { (label, reason) ->
+                        TextButton(
+                            onClick = {
+                                reportDialog = false
+                                reportScope.launch {
+                                    runCatching { api.reportPost(post.id, reason) }
+                                        .onSuccess { reportStatus = "Жалоба отправлена" }
+                                        .onFailure { reportStatus = it.message ?: "Не удалось отправить жалобу" }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(label, color = Color.White) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { reportDialog = false }) { Text("Отмена", color = theme.accent) }
+            }
+        )
     }
 }
 
