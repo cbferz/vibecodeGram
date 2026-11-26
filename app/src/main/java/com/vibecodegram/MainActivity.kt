@@ -599,6 +599,8 @@ private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> U
 @Composable
 private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, currentUserId: Long, onDismiss: () -> Unit, onDeleted: () -> Unit) {
     var deleteBusy by remember { mutableStateOf(false) }
+    var overflowExpanded by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val mediaUrl = BuildConfig.API_BASE_URL.trimEnd('/') + story.mediaUrl
     val bitmap by produceState<Bitmap?>(initialValue = null, story.id, story.mediaType) {
@@ -629,24 +631,75 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
             }
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(14.dp)) {
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(start = 14.dp, top = 16.dp, end = 116.dp, bottom = 14.dp)) {
                 Text("@${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
                 if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
             }
-            Row(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 if (story.authorId == currentUserId) {
-                    TextButton(enabled = !deleteBusy, onClick = {
-                        deleteBusy = true
-                        scope.launch {
-                            runCatching { api.deleteStory(story.id) }
-                                .onSuccess { onDeleted() }
-                                .onFailure { deleteBusy = false }
+                    Box {
+                        Box(
+                            Modifier.size(42.dp).liquidGlass(theme, CircleShape, .96f)
+                                .clickable(enabled = !deleteBusy) { overflowExpanded = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (deleteBusy) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp, color = Color.White)
+                            else Icon(Icons.Default.MoreVert, "Дополнительные действия", tint = Color.White, modifier = Modifier.size(21.dp))
                         }
-                    }) { Text("Удалить", color = Color.White) }
+                        DropdownMenu(
+                            expanded = overflowExpanded,
+                            onDismissRequest = { overflowExpanded = false },
+                            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(16.dp), .98f),
+                            containerColor = Color.Transparent
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Удалить историю", color = Color(0xFFFF8294)) },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF8294)) },
+                                enabled = !deleteBusy,
+                                onClick = {
+                                    overflowExpanded = false
+                                    confirmDelete = true
+                                }
+                            )
+                        }
+                    }
                 }
-                TextButton(onClick = onDismiss) { Text("Закрыть", color = Color.White) }
+                Box(
+                    Modifier.size(42.dp).liquidGlass(theme, CircleShape, .96f)
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Close, "Закрыть историю", tint = Color.White, modifier = Modifier.size(21.dp))
+                }
             }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!deleteBusy) confirmDelete = false },
+            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .98f),
+            containerColor = Color.Transparent,
+            title = { Text("Удалить историю?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Эта история будет удалена без возможности восстановления.", color = theme.secondary) },
+            confirmButton = {
+                TextButton(enabled = !deleteBusy, onClick = {
+                    deleteBusy = true
+                    scope.launch {
+                        runCatching { api.deleteStory(story.id) }
+                            .onSuccess { onDeleted() }
+                            .onFailure { deleteBusy = false; confirmDelete = false }
+                    }
+                }) {
+                    if (deleteBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
+                    else Text("Удалить", color = Color(0xFFFF8294))
+                }
+            },
+            dismissButton = { TextButton(enabled = !deleteBusy, onClick = { confirmDelete = false }) { Text("Отмена", color = theme.secondary) } }
+        )
     }
 }
 
