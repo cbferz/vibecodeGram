@@ -26,12 +26,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +52,10 @@ import com.kyant.backdrop.catalog.components.LiquidBottomTab
 import com.kyant.backdrop.catalog.components.LiquidBottomTabs
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import kotlin.math.roundToInt
 import com.vibecodegram.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -86,16 +93,7 @@ private fun GlassPopupMenu(
             Column(
                 modifier = Modifier
                     .width(224.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                theme.surface.copy(alpha = .98f),
-                                theme.background.copy(alpha = .97f)
-                            )
-                        ),
-                        RoundedCornerShape(20.dp)
-                    )
-                    .border(1.dp, theme.accent.copy(alpha = .22f), RoundedCornerShape(20.dp))
+                    .liquidGlass(theme, RoundedCornerShape(20.dp), .88f)
                     .padding(7.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
                 content = content
@@ -127,6 +125,8 @@ private fun GlassMenuItem(
 }
 
 private data class Palette(val name: String, val background: Color, val surface: Color, val accent: Color, val secondary: Color, val glow: Color)
+
+private val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 private val palettes = listOf(
     Palette("Graphite", Color(0xFF090B10), Color(0xFF191E28), Color(0xFFE6EAF2), Color(0xFF8D9AAA), Color(0xFF52647B)),
     Palette("Midnight", Color(0xFF080D1A), Color(0xFF17243A), Color(0xFF69C9FF), Color(0xFF9BB6D2), Color(0xFF17669A)),
@@ -188,6 +188,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background)))
                     .padding(top = padding.calculateTopPadding(), start = padding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current), end = padding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current))
             ) {
+                CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdrop) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
@@ -202,6 +203,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                             bottomInset = padding.calculateBottomPadding()
                         )
                     }
+                }
                 }
             }
         }
@@ -245,7 +247,7 @@ private fun AppHeader(theme: Palette, onSearch: () -> Unit, onSettings: () -> Un
 
 @Composable
 private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, action: () -> Unit, theme: Palette) {
-    Box(Modifier.size(42.dp).clip(CircleShape).background(theme.surface.copy(alpha = .88f)).border(1.dp, Color.White.copy(alpha = .12f), CircleShape).clickable { action() }, contentAlignment = Alignment.Center) {
+    Box(Modifier.size(42.dp).liquidGlass(theme, CircleShape, .78f).clickable { action() }, contentAlignment = Alignment.Center) {
         Icon(icon, description, tint = theme.accent, modifier = Modifier.size(19.dp))
     }
 }
@@ -335,7 +337,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.c
                 Spacer(Modifier.height(12.dp))
                 Text(post.text, color = Color(0xFFE5EAF1), fontSize = 14.sp, lineHeight = 21.sp)
                 Spacer(Modifier.height(12.dp))
-                Surface(color = theme.accent.copy(alpha = .10f), shape = RoundedCornerShape(8.dp)) {
+                Surface(color = theme.accent.copy(alpha = .14f), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .10f))) {
                     Text("#${post.tag}", color = theme.accent, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
                 }
                 Spacer(Modifier.height(10.dp))
@@ -427,7 +429,7 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, prefs: android.content.Sh
         prefs.edit().putString(key,array.toString()).apply()
     }
     Dialog(onDismissRequest = onClose) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f), shape = RoundedCornerShape(24.dp), color = theme.background) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f).liquidGlass(theme, RoundedCornerShape(24.dp), .94f), shape = RoundedCornerShape(24.dp), color = Color.Transparent, tonalElevation = 0.dp) {
             Column(Modifier.fillMaxSize().padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Avatar(chat.name.take(1),theme.accent,42)
@@ -442,7 +444,7 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, prefs: android.content.Sh
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     items(messages,key={it.id}) { m ->
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=if(m.outgoing) Arrangement.End else Arrangement.Start) {
-                            Column(Modifier.widthIn(max=280.dp).clip(RoundedCornerShape(16.dp)).background(if(m.outgoing) theme.accent.copy(alpha=.2f) else theme.surface).padding(12.dp)) {
+                            Column(Modifier.widthIn(max=280.dp).liquidGlass(theme, RoundedCornerShape(16.dp), if (m.outgoing) .58f else .82f).padding(12.dp)) {
                                 Text(m.text,color=Color.White,fontSize=14.sp,lineHeight=19.sp)
                                 Text(m.time,color=theme.secondary,fontSize=9.sp,modifier=Modifier.align(Alignment.End))
                             }
@@ -766,7 +768,40 @@ private fun Avatar(letter: String, accent: Color, size: Int) {
 
 @Composable
 private fun GlassCard(theme: Palette, compact: Boolean = false, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Brush.linearGradient(listOf(theme.surface.copy(alpha = .96f), theme.surface.copy(alpha = .72f)))).border(1.dp, Color.White.copy(alpha = .10f), RoundedCornerShape(22.dp)).padding(if (compact) 12.dp else 16.dp), content = content)
+    Column(modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(22.dp), .82f).padding(if (compact) 12.dp else 16.dp), content = content)
+}
+
+@Composable
+private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float = .8f): Modifier {
+    val backdrop = LocalLiquidGlassBackdrop.current
+    val glassFill = Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = .15f * intensity),
+            theme.surface.copy(alpha = .58f),
+            theme.background.copy(alpha = .48f),
+            theme.surface.copy(alpha = .66f)
+        )
+    )
+    val base = this.shadow(18.dp, shape, clip = false).clip(shape)
+    val surface = if (backdrop != null && Build.VERSION.SDK_INT >= 31) {
+        base.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur((18f * intensity).dp.toPx())
+                if (Build.VERSION.SDK_INT >= 33) {
+                    lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
+                }
+            },
+            onDrawSurface = { drawRect(glassFill) }
+        )
+    } else {
+        base.background(glassFill)
+    }
+    return surface
+        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .38f), Color.White.copy(alpha = .08f), theme.accent.copy(alpha = .16f))), shape)
+        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .20f), Color.Transparent)), shape)
 }
 
 @Composable
