@@ -9,6 +9,7 @@ import (
 )
 
 func (a *App) registerPostRoutes(r chi.Router) {
+	r.Get("/users/search", a.searchUsers)
 	r.Get("/posts", a.listPosts)
 	r.Post("/posts", a.createPost)
 	r.Post("/posts/{id}/like", a.togglePostLike)
@@ -98,4 +99,22 @@ func (a *App) hidePost(w http.ResponseWriter,r *http.Request) {
 	if err!=nil { fail(w,500,"could not hide post"); return }
 	n,_:=res.RowsAffected(); if n==0 { var exists bool; _=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM posts WHERE id=$1)",id).Scan(&exists); if !exists { fail(w,404,"post not found"); return } }
 	writeJSON(w,200,map[string]any{"hidden":true})
+}
+
+func (a *App) searchUsers(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 || len(q) > 32 { fail(w, 400, "search query must be 2-32 characters"); return }
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,username,display_name FROM users
+		WHERE id<>$1 AND (username ILIKE $2 OR display_name ILIKE $2)
+		ORDER BY CASE WHEN username ILIKE $3 THEN 0 ELSE 1 END, username LIMIT 30`, uid(r), "%"+q+"%", q)
+	if err != nil { fail(w,500,"could not search users"); return }
+	defer rows.Close()
+	out := make([]map[string]any,0)
+	for rows.Next() {
+		var id int64; var username, displayName string
+		if err:=rows.Scan(&id,&username,&displayName); err!=nil { fail(w,500,"could not read users"); return }
+		out=append(out,map[string]any{"id":id,"username":username,"display_name":displayName})
+	}
+	if err:=rows.Err(); err!=nil { fail(w,500,"could not read users"); return }
+	writeJSON(w,200,out)
 }
