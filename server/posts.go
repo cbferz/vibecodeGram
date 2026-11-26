@@ -233,7 +233,7 @@ func (v *postVideoReader) Read(p []byte) (int, error) {
 		length := chunkSize
 		if remaining := v.size - start; remaining < length { length = remaining }
 		var chunk []byte
-		err := v.db.QueryRowContext(v.ctx, `SELECT substring(v.data from $2 for $3)
+		err := v.db.QueryRowContext(v.ctx, `SELECT substring(v.data from $2::integer for $3::integer)
 			FROM post_videos v JOIN posts p ON p.id=v.post_id
 			WHERE p.id=$1 AND NOT EXISTS(SELECT 1 FROM user_blocks b
 				WHERE (b.blocker_id=$4 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$4))`,
