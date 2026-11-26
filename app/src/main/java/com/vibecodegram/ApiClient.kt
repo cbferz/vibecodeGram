@@ -35,6 +35,8 @@ data class ApiStory(val id: Long, val authorId: Long, val username: String, val 
 data class ApiProfile(val id: Long, val username: String, val displayName: String, val bio: String, val avatarUrl: String, val coverUrl: String, val website: String, val location: String, val followers: Long, val following: Long, val posts: Long, val followed: Boolean, val isMe: Boolean)
 data class ApiComment(val id: Long, val authorId: Long, val username: String, val displayName: String, val body: String, val createdAt: String)
 data class ApiNotification(val id: Long, val actorId: Long, val username: String, val displayName: String, val kind: String, val read: Boolean, val createdAt: String)
+data class ApiBlockedUser(val id: Long, val username: String, val displayName: String, val blockedAt: String)
+data class ApiPostReport(val id: Long, val postId: Long, val reason: String, val details: String, val status: String, val createdAt: String, val updatedAt: String)
 
 class ApiClient(private val prefs: SharedPreferences) {
     private val base = BuildConfig.API_BASE_URL.trimEnd('/')
@@ -253,6 +255,36 @@ class ApiClient(private val prefs: SharedPreferences) {
     suspend fun addComment(postId: Long, body: String) {
         call("POST", "/v1/posts/$postId/comments", JSONObject().put("body",body))
     }
+    suspend fun blockUser(userId: Long) {
+        require(userId > 0) { "Некорректный пользователь" }
+        call("POST", "/v1/users/$userId/block", JSONObject())
+    }
+    suspend fun unblockUser(userId: Long) {
+        require(userId > 0) { "Некорректный пользователь" }
+        call("DELETE", "/v1/users/$userId/block")
+    }
+    suspend fun blockedUsers(): List<ApiBlockedUser> {
+        val arr = JSONArray(call("GET", "/v1/me/blocked"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { item ->
+            ApiBlockedUser(item.getLong("id"), item.optString("username"),
+                item.optString("display_name"), item.optString("blocked_at"))
+        } }
+    }
+    suspend fun reportPost(postId: Long, reason: String, details: String = "") {
+        require(postId > 0) { "Некорректная публикация" }
+        call("POST", "/v1/posts/$postId/report",
+            JSONObject().put("reason", reason).put("details", details))
+    }
+    suspend fun myReports(limit: Int = 50): List<ApiPostReport> {
+        val safeLimit = limit.coerceIn(1, 100)
+        val arr = JSONArray(call("GET", "/v1/me/reports?limit=$safeLimit"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { item ->
+            ApiPostReport(item.getLong("id"), item.getLong("post_id"), item.optString("reason"),
+                item.optString("details"), item.optString("status"),
+                item.optString("created_at"), item.optString("updated_at"))
+        } }
+    }
+
     suspend fun notifications(): List<ApiNotification> {
         val arr = JSONArray(call("GET", "/v1/notifications"))
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { x ->
