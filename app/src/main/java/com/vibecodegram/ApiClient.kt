@@ -1,17 +1,35 @@
 package com.vibecodegram
 
+import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
+import java.io.DataOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class ApiUser(val id: Long, val username: String, val displayName: String)
 data class ApiConversation(val id: Long, val kind: String, val title: String, val lastMessage: String)
 data class ApiMessage(val id: Long, val senderId: Long, val username: String, val body: String, val createdAt: String)
-data class ApiPost(val id: Long, val authorId: Long, val username: String, val displayName: String, val body: String, val tag: String, val createdAt: String, val likes: Long, val liked: Boolean, val saved: Boolean)
+data class ApiPost(
+    val id: Long,
+    val authorId: Long,
+    val username: String,
+    val displayName: String,
+    val body: String,
+    val tag: String,
+    val createdAt: String,
+    val likes: Long,
+    val liked: Boolean,
+    val saved: Boolean,
+    val videoUrl: String = "",
+    val mediaType: String = "",
+    val mediaSize: Long = 0L
+)
 data class AuthResult(val token: String, val user: ApiUser)
 
 class ApiClient(private val prefs: SharedPreferences) {
@@ -65,11 +83,56 @@ class ApiClient(private val prefs: SharedPreferences) {
         val arr = JSONArray(call("GET", "/v1/posts?sort=$sort"))
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
             ApiPost(p.getLong("id"), p.getLong("author_id"), p.optString("username"), p.optString("display_name"),
-                p.optString("body"), p.optString("tag"), p.optString("created_at"), p.optLong("likes"), p.optBoolean("liked"), p.optBoolean("saved"))
+                p.optString("body"), p.optString("tag"), p.optString("created_at"), p.optLong("likes"), p.optBoolean("liked"), p.optBoolean("saved"),
+                p.optString("video_url"), p.optString("media_type"), p.optLong("media_size"))
         } }
     }
-    suspend fun createPost(body: String, tag: String) {
-        call("POST", "/v1/posts", JSONObject().put("body", body).put("tag", tag))
+    suspend fun createPost(body: String, tag: String, videoUri: Uri? = null, context: Context? = null) {
+        if (videoUri == null) {
+            call("POST", "/v1/posts", JSONObject().put("body", body).put("tag", tag))
+            return
+        }
+        val appContext = context ?: throw IllegalArgumentException("Context is required for video upload")
+        withContext(Dispatchers.IO) {
+            val boundary = "vibecodegram-${UUID.randomUUID().toString().replace("-", "")}"
+            val connection = (URL("$base/v1/posts/video").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000
+                readTimeout = 120000
+                doOutput = true
+                setChunkedStreamingMode(64 * 1024)
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                token?.let { setRequestProperty("Authorization", "Bearer $it") }
+            }
+            try {
+                DataOutputStream(connection.outputStream).use { output ->
+                    output.writeBytes("--$boundary\\r\\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\\"body\\"\\r\\n\\r\\n")
+                    output.write(body.toByteArray(Charsets.UTF_8))
+                    output.writeBytes("\\r\\n--$boundary\\r\\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\\"tag\\"\\r\\n\\r\\n")
+                    output.write(tag.toByteArray(Charsets.UTF_8))
+                    output.writeBytes("\\r\\n--$boundary\\r\\n")
+                    output.writeBytes("Content-Disposition: form-data; name=\\"video\\"; filename=\\"upload.mp4\\"\\r\\n")
+                    output.writeBytes("Content-Type: video/mp4\\r\\n\\r\\n")
+                    val input = appContext.contentResolver.openInputStream(videoUri)
+                        ?: throw IllegalStateException("Не удалось открыть выбранное видео")
+                    input.use { it.copyTo(output, 64 * 1024) }
+                    output.writeBytes("\\r\\n--$boundary--\\r\\n")
+                    output.flush()
+                }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    val message = runCatching { JSONObject(response).optString("error") }.getOrDefault("")
+                    throw IllegalStateException(message.ifBlank { "HTTP $code" })
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
     }
     suspend fun toggleLike(postId: Long): Pair<Boolean, Long> {
         val p = JSONObject(call("POST", "/v1/posts/$postId/like", JSONObject()))
