@@ -822,6 +822,7 @@ private fun ProfileScreen(
                 post = savedPost,
                 theme = theme,
                 compact = false,
+                api = api,
                 onLike = {
                     savedScope.launch {
                         runCatching { api.toggleLike(savedPost.id) }.onSuccess { result ->
@@ -882,6 +883,7 @@ private fun ProfileScreen(
                 post = hiddenPost,
                 theme = theme,
                 compact = false,
+                api = api,
                 onLike = {
                     savedScope.launch {
                         runCatching { api.toggleLike(hiddenPost.id) }.onSuccess { result ->
