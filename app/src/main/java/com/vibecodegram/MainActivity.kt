@@ -179,8 +179,6 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     val destinations = listOf(
         Destination("Лента", Icons.Default.Home, "Твоя лента"),
         Destination("Чаты", Icons.Default.ChatBubble, "Сообщения"),
-        Destination("Видео", Icons.Default.PlayCircle, "Видео"),
-        Destination("Обзор", Icons.Default.Explore, "Интересное"),
         Destination("Профиль", Icons.Default.Person, "Профиль")
     )
     MaterialTheme(colorScheme = darkColorScheme(primary = theme.accent, background = theme.background, surface = theme.surface, onPrimary = theme.background, onBackground = Color.White, onSurface = Color.White)) {
@@ -209,8 +207,6 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     when (page) {
                         0 -> FeedScreen(theme, compact, 0.dp, prefs)
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
-                        2 -> VideosScreen(theme, 0.dp)
-                        3 -> ExploreScreen(theme, search, { search = it }, 0.dp)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
                             onCustomize = { editor = true },
@@ -270,107 +266,11 @@ private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, de
 
 @Composable
 private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.compose.ui.unit.Dp, prefs: android.content.SharedPreferences) {
-    val context = LocalContext.current
-    var selectedFilter by remember { mutableStateOf("Для тебя") }
-    var liked by remember { mutableStateOf(prefs.getStringSet("feed_liked", emptySet())?.toSet() ?: emptySet()) }
-    var saved by remember { mutableStateOf(prefs.getStringSet("feed_saved", emptySet())?.toSet() ?: emptySet()) }
-    var hidden by remember { mutableStateOf(prefs.getStringSet("feed_hidden", emptySet())?.toSet() ?: emptySet()) }
-    val posts = listOf(
-        Post("Алекс", "@alexwave", "2 мин", "Иногда лучший апдейт — это просто сделать интерфейс таким, каким давно хотел его видеть.", "Дизайн", 128),
-        Post("Mira", "@mira.jpg", "18 мин", "Собрала новый плейлист для ночных поездок. Какой трек у вас сейчас на повторе?", "Музыка", 86),
-        Post("vibecodeGram", "@vibecodegram", "1 ч", "Здесь будет твоя лента: публикации, истории, реакции и обсуждения. Настраивай внешний вид под себя.", "Обновления", 54)
-    )
-    val visiblePosts = posts.filterNot { it.handle in hidden }.filter { post ->
-        when (selectedFilter) {
-            "Подписки" -> post.author == "Алекс" || post.author == "Mira"
-            "Популярное" -> post.likes >= 80
-            "Медиа" -> false
-            else -> true
-        }
-    }
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("Для тебя", "Подписки", "Популярное", "Медиа").forEach { label ->
-            FilterChip(selected = selectedFilter == label, onClick = { selectedFilter = label }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
-        }
-    }
-    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
-        item { GlassCard(theme, compact) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar("Ты", theme.accent, 42)
-                Spacer(Modifier.width(10.dp))
-                Text("Что нового?", color = theme.secondary, modifier = Modifier.weight(1f))
-                Text("＋", color = theme.accent, fontSize = 24.sp)
-            }
-        } }
-        if (visiblePosts.isEmpty()) {
-            item {
-                Text(
-                    if (selectedFilter == "Медиа") "Пока нет публикаций с медиа" else "Здесь пока пусто",
-                    color = theme.secondary,
-                    modifier = Modifier.fillMaxWidth().padding(28.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
-        }
-        items(visiblePosts, key = { it.handle }) { post ->
-            var menu by remember { mutableStateOf(false) }
-            GlassCard(theme, compact, Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true })) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(post.author.take(1), theme.accent, 40)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(post.author, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("${post.handle} · ${post.time}", color = theme.secondary, fontSize = 11.sp)
-                    }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreHoriz, "Ещё", tint = theme.secondary) }
-                        GlassPopupMenu(expanded = menu, onDismissRequest = { menu = false }, theme = theme) {
-                            GlassMenuItem(
-                                if (post.handle in saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                if (post.handle in saved) "Убрать из сохранённого" else "Сохранить",
-                                theme
-                            ) {
-                                saved = if (post.handle in saved) saved - post.handle else saved + post.handle
-                                prefs.edit().putStringSet("feed_saved", saved).apply()
-                                menu = false
-                            }
-                            GlassMenuItem(Icons.Default.VisibilityOff, "Скрыть публикацию", theme) {
-                                hidden = hidden + post.handle
-                                prefs.edit().putStringSet("feed_hidden", hidden).apply()
-                                menu = false
-                            }
-                            GlassMenuItem(Icons.Default.Share, "Поделиться", theme) {
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, "${post.author} (${post.handle})\n\n${post.text}")
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Поделиться публикацией"))
-                                menu = false
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Text(post.text, color = Color(0xFFE5EAF1), fontSize = 14.sp, lineHeight = 21.sp)
-                Spacer(Modifier.height(12.dp))
-                Surface(color = theme.accent.copy(alpha = .14f), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .10f))) {
-                    Text("#${post.tag}", color = theme.accent, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        liked = if (post.handle in liked) liked - post.handle else liked + post.handle
-                        prefs.edit().putStringSet("feed_liked", liked).apply()
-                    }) {
-                        Icon(if (post.handle in liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (post.handle in liked) Color(0xFFFF718B) else theme.secondary, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text((post.likes + if (post.handle in liked) 1 else 0).toString(), color = theme.secondary)
-                    }
-                    TextButton(onClick = {}) { Icon(Icons.Default.ChatBubbleOutline, null, tint = theme.secondary, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Ответить", color = theme.secondary) }
-                    Spacer(Modifier.weight(1f))
-                    Text("•••", color = theme.secondary)
-                }
-            }
+    Box(Modifier.fillMaxSize().padding(20.dp),contentAlignment=Alignment.Center) {
+        Column(horizontalAlignment=Alignment.CenterHorizontally) {
+            Icon(Icons.Default.DynamicFeed,null,tint=theme.secondary,modifier=Modifier.size(44.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("Пока нет публикаций",color=Color.White,fontWeight=FontWeight.SemiBold)
         }
     }
 }
