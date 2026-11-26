@@ -230,6 +230,12 @@ func (a *App) togglePostLike(w http.ResponseWriter, r *http.Request) {
 		added AS (INSERT INTO post_likes(post_id,user_id) SELECT $1,$2 WHERE NOT EXISTS(SELECT 1 FROM removed) ON CONFLICT DO NOTHING RETURNING 1)
 		SELECT EXISTS(SELECT 1 FROM added)`,id,uid(r)).Scan(&liked)
 	if err!=nil { fail(w,500,"could not update like"); return }
+	if liked {
+		var authorID int64
+		if authorErr:=a.db.QueryRowContext(r.Context(),"SELECT author_id FROM posts WHERE id=$1",id).Scan(&authorID); authorErr==nil && authorID!=uid(r) {
+			_,_=a.db.ExecContext(r.Context(),"INSERT INTO notifications(recipient_id,actor_id,kind,post_id) VALUES($1,$2,'like',$3)",authorID,uid(r),id)
+		}
+	}
 	var count int64
 	if err=a.db.QueryRowContext(r.Context(),"SELECT COUNT(*) FROM post_likes WHERE post_id=$1",id).Scan(&count); err!=nil { fail(w,500,"could not update like"); return }
 	writeJSON(w,200,map[string]any{"liked":liked,"likes":count})

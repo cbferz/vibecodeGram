@@ -1,6 +1,8 @@
 package com.vibecodegram
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -14,6 +16,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Shape
@@ -118,6 +122,44 @@ class MainActivity : ComponentActivity() {
             previous?.uncaughtException(thread, error)
         }
     }
+    if (editProfile && profile != null) {
+        ProfileEditDialog(profile!!, theme, onDismiss = { editProfile = false }, onSave = { displayName, bio, avatar, cover, website, location ->
+            savedScope.launch {
+                profileError = null
+                runCatching { api.updateProfile(displayName, bio, avatar, cover, website, location); api.profile(user.id) }
+                    .onSuccess { profile = it; editProfile = false }
+                    .onFailure { profileError = it.message ?: "Не удалось сохранить профиль" }
+            }
+        })
+    }
+}
+
+@Composable
+private fun ProfileEditDialog(profile: ApiProfile, theme: Palette, onDismiss: () -> Unit, onSave: (String, String, String, String, String, String) -> Unit) {
+    var name by remember(profile.id) { mutableStateOf(profile.displayName) }
+    var bio by remember(profile.id) { mutableStateOf(profile.bio) }
+    var avatar by remember(profile.id) { mutableStateOf(profile.avatarUrl) }
+    var cover by remember(profile.id) { mutableStateOf(profile.coverUrl) }
+    var website by remember(profile.id) { mutableStateOf(profile.website) }
+    var location by remember(profile.id) { mutableStateOf(profile.location) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+        containerColor = Color.Transparent,
+        title = { Text("Редактирование профиля", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it.take(64) }, modifier = Modifier.fillMaxWidth(), label = { Text("Имя") }, singleLine = true)
+                OutlinedTextField(bio, { bio = it.take(160) }, modifier = Modifier.fillMaxWidth(), label = { Text("О себе") }, minLines = 2, maxLines = 4)
+                OutlinedTextField(avatar, { avatar = it.take(2048) }, modifier = Modifier.fillMaxWidth(), label = { Text("URL аватара") }, singleLine = true)
+                OutlinedTextField(cover, { cover = it.take(2048) }, modifier = Modifier.fillMaxWidth(), label = { Text("URL обложки") }, singleLine = true)
+                OutlinedTextField(website, { website = it.take(255) }, modifier = Modifier.fillMaxWidth(), label = { Text("Сайт") }, singleLine = true)
+                OutlinedTextField(location, { location = it.take(100) }, modifier = Modifier.fillMaxWidth(), label = { Text("Город") }, singleLine = true)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(name.trim(), bio.trim(), avatar.trim(), cover.trim(), website.trim(), location.trim()) }) { Text("Сохранить", color = theme.accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = theme.secondary) } }
+    )
 }
 
 @Composable
@@ -176,11 +218,13 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     .padding(padding)
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    AppHeader(theme, onSearch = { page = 2 }, onSettings = { editor = true })
+                    AppHeader(theme, onSearch = { page = 4 }, onNotifications = { page = 5 }, onSettings = { editor = true })
                     when (page) {
-                        0 -> FeedScreen(theme, compact, api)
+                        0 -> FeedScreen(theme, compact, api, currentUser!!.id)
                         1 -> ReelsScreen(theme, api)
                         2 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
+                        4 -> SearchScreen(theme, api, onOpenChat = { openedChat = it })
+                        5 -> NotificationsScreen(theme, api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
                             currentUser!!, api, onLogout = { appScope.launch { api.logout(); currentUser = null } },
@@ -221,14 +265,16 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
 }
 
 @Composable
-private fun AppHeader(theme: Palette, onSearch: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun AppHeader(theme: Palette, onSearch: () -> Unit, onNotifications: () -> Unit, onSettings: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("vibecodeGram", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black, letterSpacing = (-.7).sp)
             Text("ТВОЁ ПРОСТРАНСТВО · ТВОИ ПРАВИЛА", color = theme.accent, fontSize = 9.sp, letterSpacing = 1.25.sp, fontWeight = FontWeight.Bold)
         }
         HeaderIcon(Icons.Default.Search, "Поиск", onSearch, theme)
-        Spacer(Modifier.width(9.dp))
+        Spacer(Modifier.width(5.dp))
+        HeaderIcon(Icons.Default.NotificationsNone, "Уведомления", onNotifications, theme)
+        Spacer(Modifier.width(5.dp))
         HeaderIcon(Icons.Default.Tune, "Оформление", onSettings, theme)
     }
 }
@@ -355,7 +401,272 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
 }
 
 @Composable
-private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
+private fun StoriesStrip(theme: Palette, api: ApiClient, currentUserId: Long) {
+    var stories by remember { mutableStateOf<List<ApiStory>>(emptyList()) }
+    var create by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<ApiStory?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(api.token, refreshKey) {
+        runCatching { api.stories() }.onSuccess { stories = it }
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp)) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                Modifier.width(68.dp).clickable { create = true },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(Modifier.size(58.dp).clip(CircleShape).background(theme.surface).border(1.5.dp, theme.accent, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Add, "Добавить историю", tint = theme.accent, modifier = Modifier.size(28.dp))
+                }
+                Spacer(Modifier.height(5.dp))
+                Text("Моя история", color = theme.secondary, fontSize = 10.sp, maxLines = 1)
+            }
+            stories.distinctBy { it.authorId }.forEach { story ->
+                Column(
+                    Modifier.width(68.dp).clickable {
+                        selected = story
+                        scope.launch { runCatching { api.viewStory(story.id) } }
+                    },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        Modifier.size(58.dp).border(2.dp, if (story.viewed) theme.secondary.copy(alpha = .45f) else theme.accent, CircleShape).padding(3.dp)
+                            .clip(CircleShape).background(theme.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(story.displayName.ifBlank { story.username }.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text(story.username, color = theme.secondary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+    if (create) CreateStoryDialog(theme, api, onDismiss = { create = false }, onCreated = { create = false; refreshKey++ })
+    selected?.let { story -> StoryViewerDialog(story, theme, api, currentUserId, onDismiss = { selected = null }, onDeleted = { selected = null; refreshKey++ }) }
+}
+
+@Composable
+private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> Unit, onCreated: () -> Unit) {
+    var caption by remember { mutableStateOf("") }
+    var duration by remember { mutableIntStateOf(24) }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selectedUri = it }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+        containerColor = Color.Transparent,
+        title = { Text("Новая история", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { picker.launch(arrayOf("image/*", "video/mp4")) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.AddPhotoAlternate, null); Spacer(Modifier.width(8.dp))
+                    Text(if (selectedUri == null) "Выбрать фото или видео" else "Медиа выбрано · заменить")
+                }
+                OutlinedTextField(caption, { caption = it.take(500) }, modifier = Modifier.fillMaxWidth(), label = { Text("Подпись") }, maxLines = 3)
+                Box {
+                    OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Исчезнет через $duration ч")
+                        Icon(Icons.Default.ExpandMore, null)
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        listOf(5, 12, 24, 48).forEach { hours ->
+                            DropdownMenuItem(text = { Text("$hours часов") }, onClick = { duration = hours; expanded = false })
+                        }
+                    }
+                }
+                Text("История автоматически исчезнет через выбранное время.", color = theme.secondary, fontSize = 11.sp)
+                error?.let { Text(it, color = Color(0xFFFF8294), fontSize = 11.sp) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = selectedUri != null && !busy, onClick = {
+                val uri = selectedUri ?: return@TextButton
+                busy = true; error = null
+                scope.launch {
+                    runCatching { api.createStory(uri, caption.trim(), duration, context) }
+                        .onSuccess { onCreated() }
+                        .onFailure { error = it.message ?: "Не удалось опубликовать историю"; busy = false }
+                }
+            }) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Опубликовать", color = theme.accent) }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Отмена", color = theme.secondary) } }
+    )
+}
+
+@Composable
+private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, currentUserId: Long, onDismiss: () -> Unit, onDeleted: () -> Unit) {
+    var deleteBusy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val mediaUrl = BuildConfig.API_BASE_URL.trimEnd('/') + story.mediaUrl
+    val bitmap by produceState<Bitmap?>(initialValue = null, story.id, story.mediaType) {
+        if (story.mediaType.startsWith("image/")) {
+            value = withContext(Dispatchers.IO) {
+                val connection = (URL(mediaUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 12000; readTimeout = 20000
+                    api.token?.let { setRequestProperty("Authorization", "Bearer $it") }
+                }
+                try {
+                    if (connection.responseCode in 200..299) connection.inputStream.use { BitmapFactory.decodeStream(it) } else null
+                } catch (_: Exception) { null } finally { connection.disconnect() }
+            }
+        }
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.88f).clip(RoundedCornerShape(24.dp)).background(Color.Black)) {
+            if (story.mediaType == "video/mp4") {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx -> VideoView(ctx).apply {
+                        setVideoURI(Uri.parse(mediaUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
+                        setOnPreparedListener { it.isLooping = true; start() }
+                    } }
+                )
+            } else if (bitmap != null) {
+                Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            }
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(14.dp)) {
+                Text("@${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
+                if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
+            }
+            Row(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (story.authorId == currentUserId) {
+                    TextButton(enabled = !deleteBusy, onClick = {
+                        deleteBusy = true
+                        scope.launch {
+                            runCatching { api.deleteStory(story.id) }
+                                .onSuccess { onDeleted() }
+                                .onFailure { deleteBusy = false }
+                        }
+                    }) { Text("Удалить", color = Color.White) }
+                }
+                TextButton(onClick = onDismiss) { Text("Закрыть", color = Color.White) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var users by remember { mutableStateOf<List<ApiUser>>(emptyList()) }
+    var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(query) {
+        val term = query.trim()
+        if (term.length < 2) { users = emptyList(); posts = emptyList(); loading = false; return@LaunchedEffect }
+        kotlinx.coroutines.delay(300)
+        loading = true; error = null
+        val userResult = runCatching { api.searchUsers(term) }
+        val postResult = runCatching { api.searchPosts(term) }
+        users = userResult.getOrDefault(emptyList())
+        posts = postResult.getOrDefault(emptyList())
+        if (userResult.isFailure && postResult.isFailure) error = userResult.exceptionOrNull()?.message ?: "Поиск не удался"
+        loading = false
+    }
+    Column(Modifier.fillMaxSize()) {
+        Text("Поиск", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+        OutlinedTextField(
+            value = query, onValueChange = { query = it.take(80) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            placeholder = { Text("Люди, публикации, теги") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
+            shape = RoundedCornerShape(18.dp)
+        )
+        when {
+            loading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            error != null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xFFFF8294)) }
+            query.trim().length < 2 -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text("Введи минимум 2 символа.", color = theme.secondary) }
+            users.isEmpty() && posts.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text("Ничего не найдено.", color = theme.secondary) }
+            else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                if (users.isNotEmpty()) item { Text("Пользователи", color = theme.accent, fontWeight = FontWeight.Bold) }
+                items(users, key = { "u${it.id}" }) { user ->
+                    GlassCard(theme, modifier = Modifier.clickable {
+                        scope.launch {
+                            runCatching { api.createDirectConversation(user.id) }.onSuccess { id ->
+                                onOpenChat(Chat(user.displayName.ifBlank { user.username }, "@${user.username}", "", 0, false, false, id))
+                            }
+                        }
+                    }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(user.displayName.ifBlank { user.username }.take(1), theme.accent, 42)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(user.displayName.ifBlank { user.username }, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text("@${user.username}", color = theme.secondary, fontSize = 11.sp)
+                            }
+                            Text("Написать", color = theme.accent, fontSize = 11.sp)
+                        }
+                    }
+                }
+                if (posts.isNotEmpty()) item { Text("Публикации", color = theme.accent, fontWeight = FontWeight.Bold) }
+                items(posts, key = { "p${it.id}" }) { post ->
+                    FeedPostCard(post, theme, false, api,
+                        onLike = { scope.launch { runCatching { api.toggleLike(post.id) } } },
+                        onSave = { scope.launch { runCatching { api.setSaved(post.id, !post.saved) } } },
+                        onHide = { scope.launch { runCatching { api.hidePost(post.id) } } })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationsScreen(theme: Palette, api: ApiClient) {
+    var notifications by remember { mutableStateOf<List<ApiNotification>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(api.token, refresh) {
+        loading = true; error = null
+        runCatching { api.markNotificationsRead(); api.notifications() }
+            .onSuccess { notifications = it }
+            .onFailure { error = it.message ?: "Не удалось загрузить уведомления" }
+        loading = false
+    }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Уведомления", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = { refresh++ }) { Icon(Icons.Default.Refresh, "Обновить", tint = theme.accent) }
+        }
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xFFFF8294)) }
+            notifications.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Пока нет уведомлений.", color = theme.secondary) }
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(notifications, key = { it.id }) { item ->
+                    GlassCard(theme) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(item.displayName.ifBlank { item.username }.take(1), theme.accent, 42)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                val action = when (item.kind) { "follow" -> "подписался на тебя"; "comment" -> "прокомментировал твою публикацию"; "like" -> "оценил твою публикацию"; else -> "есть новое событие" }
+                                Text("${item.displayName.ifBlank { "@${item.username}" }} $action", color = Color.White, fontSize = 13.sp)
+                                Text(item.createdAt.replace("T", " ").take(16), color = theme.secondary, fontSize = 10.sp)
+                            }
+                            if (!item.read) Box(Modifier.size(8.dp).clip(CircleShape).background(theme.accent))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient, currentUserId: Long) {
     var sort by remember { mutableStateOf("latest") }
     var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -370,7 +681,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
         loading = posts.isEmpty()
         refreshing = posts.isNotEmpty()
         error = null
-        runCatching { api.posts(sort) }
+        runCatching { if (sort == "recommended") api.recommendations() else api.posts(sort) }
             .onSuccess { posts = it }
             .onFailure { error = it.message ?: "Не удалось загрузить ленту" }
         loading = false
@@ -378,12 +689,13 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
     }
 
     Column(Modifier.fillMaxSize()) {
+        StoriesStrip(theme, api, currentUserId)
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf("Для тебя" to "latest", "Популярное" to "popular", "Видео" to "videos").forEach { (label, value) ->
+            listOf("Для тебя" to "latest", "Рекомендации" to "recommended", "Популярное" to "popular", "Видео" to "videos").forEach { (label, value) ->
                 FilterChip(
                     selected = sort == value,
                     onClick = { if (sort != value) sort = value },
@@ -855,8 +1167,12 @@ private fun ProfileScreen(
     var hiddenPosts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
     var hiddenLoading by remember { mutableStateOf(true) }
     var hiddenError by remember { mutableStateOf<String?>(null) }
+    var profile by remember { mutableStateOf<ApiProfile?>(null) }
+    var editProfile by remember { mutableStateOf(false) }
+    var profileError by remember { mutableStateOf<String?>(null) }
     val savedScope = rememberCoroutineScope()
-    LaunchedEffect(api.token) {
+    LaunchedEffect(api.token, user.id) {
+        runCatching { api.profile(user.id) }.onSuccess { profile = it }
         savedLoading = true
         hiddenLoading = true
         savedError = null
@@ -892,7 +1208,27 @@ private fun ProfileScreen(
             Spacer(Modifier.height(12.dp))
             Text(user.displayName, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
             Text("@"+user.username, color = theme.secondary, fontSize = 13.sp)
-            Spacer(Modifier.height(18.dp))
+            profile?.let { data ->
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(data.posts.toString(), color = Color.White, fontWeight = FontWeight.Bold); Text("публикаций", color = theme.secondary, fontSize = 10.sp) }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(data.followers.toString(), color = Color.White, fontWeight = FontWeight.Bold); Text("подписчиков", color = theme.secondary, fontSize = 10.sp) }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(data.following.toString(), color = Color.White, fontWeight = FontWeight.Bold); Text("подписок", color = theme.secondary, fontSize = 10.sp) }
+                }
+                if (data.bio.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(data.bio, color = Color(0xFFE8EBF1), fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+                if (data.location.isNotBlank()) Text(data.location, color = theme.secondary, fontSize = 11.sp)
+                if (data.website.isNotBlank()) Text(data.website, color = theme.accent, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { editProfile = true }, shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Редактировать профиль")
+                }
+            }
+            profileError?.let { Text(it, color = Color(0xFFFF8294), fontSize = 11.sp) }
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = onProfileColors,
