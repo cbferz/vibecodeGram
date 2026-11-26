@@ -438,11 +438,6 @@ private fun ProfileScreen(
             Text(user.displayName, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
             Text("@"+user.username, color = theme.secondary, fontSize = 13.sp)
             Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                ProfileStat("0", "Публикации", theme)
-                ProfileStat("0", "Подписчики", theme)
-                ProfileStat("0", "Подписки", theme)
-            }
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = onProfileColors,
@@ -476,11 +471,6 @@ private fun ProfileScreen(
                 Text("Выйти из аккаунта",color=Color(0xFFFF8294),modifier=Modifier.weight(1f),fontSize=14.sp)
             }
             Divider(color = Color.White.copy(alpha = .08f))
-            SettingsRow(Icons.Default.Lock, "Конфиденциальность", theme)
-            Divider(color = Color.White.copy(alpha = .08f))
-            SettingsRow(Icons.Default.Notifications, "Уведомления", theme)
-            Divider(color = Color.White.copy(alpha = .08f))
-            SettingsRow(Icons.Default.HelpOutline, "Помощь и поддержка", theme)
         }
     }
 }
