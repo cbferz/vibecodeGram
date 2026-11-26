@@ -786,7 +786,7 @@ private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float 
         )
     )
     val base = this.shadow(18.dp, shape, clip = false).clip(shape)
-    val surface = if (backdrop != null && Build.VERSION.SDK_INT >= 31) {
+    val surface = if (backdrop != null && Build.VERSION.SDK_INT >= 33) {
         base.drawBackdrop(
             backdrop = backdrop,
             shape = { shape },
@@ -823,7 +823,7 @@ private fun LiquidGlassNavigationBar(
     val selectedTabIndex = remember { { shownState.value } }
     val selectedState = rememberUpdatedState(selectedIndex)
     val onSelectedState = rememberUpdatedState(onSelected)
-    val blurs = Build.VERSION.SDK_INT >= 31
+    val blurs = Build.VERSION.SDK_INT >= 33
     val refracts = Build.VERSION.SDK_INT >= 33
 
     LiquidBottomTabs(
