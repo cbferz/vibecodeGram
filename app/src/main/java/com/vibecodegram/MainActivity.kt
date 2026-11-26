@@ -609,7 +609,20 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
                     FeedPostCard(post, theme, false, api,
                         onLike = { scope.launch { runCatching { api.toggleLike(post.id) } } },
                         onSave = { scope.launch { runCatching { api.setSaved(post.id, !post.saved) } } },
-                        onHide = { scope.launch { runCatching { api.hidePost(post.id) } } })
+                        onHide = {
+                            scope.launch {
+                                runCatching { api.hidePost(post.id) }.onSuccess {
+                                    posts = posts.filterNot { it.id == post.id }
+                                }
+                            }
+                        },
+                        onBlock = {
+                            scope.launch {
+                                runCatching { api.blockUser(post.authorId) }.onSuccess {
+                                    posts = posts.filterNot { it.authorId == post.authorId }
+                                }
+                            }
+                        })
                 }
             }
         }
