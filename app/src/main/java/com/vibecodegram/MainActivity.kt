@@ -209,6 +209,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
+                            currentUser!!, api, onLogout = { api.token = null; currentUser = null },
                             onCustomize = { editor = true },
                             onProfileColors = { profileEditor = true },
                             bottomInset = 0.dp
@@ -403,6 +404,9 @@ private fun ProfileScreen(
     profileSaturation: Float,
     profileBrightness: Float,
     profileGradient: Boolean,
+    user: ApiUser,
+    api: ApiClient,
+    onLogout: () -> Unit,
     onCustomize: () -> Unit,
     onProfileColors: () -> Unit,
     bottomInset: androidx.compose.ui.unit.Dp
@@ -430,8 +434,8 @@ private fun ProfileScreen(
                 Text("V", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.height(12.dp))
-            Text("Твой профиль", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            Text("@your_username", color = theme.secondary, fontSize = 13.sp)
+            Text(user.displayName, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            Text("@"+user.username, color = theme.secondary, fontSize = 13.sp)
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 ProfileStat("0", "Публикации", theme)
@@ -463,7 +467,11 @@ private fun ProfileScreen(
         GlassCard(theme) {
             ServerStatusCard(theme)
             Divider(color = Color.White.copy(alpha = .08f))
-            SettingsRow(Icons.Default.BookmarkBorder, "Сохранённое", theme)
+            Row(Modifier.fillMaxWidth().clickable { onLogout() }.padding(vertical = 12.dp),verticalAlignment=Alignment.CenterVertically) {
+                Icon(Icons.Default.Logout,null,tint=Color(0xFFFF8294),modifier=Modifier.size(19.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Выйти из аккаунта",color=Color(0xFFFF8294),modifier=Modifier.weight(1f),fontSize=14.sp)
+            }
             Divider(color = Color.White.copy(alpha = .08f))
             SettingsRow(Icons.Default.Lock, "Конфиденциальность", theme)
             Divider(color = Color.White.copy(alpha = .08f))
