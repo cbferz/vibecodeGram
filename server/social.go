@@ -191,7 +191,18 @@ func (a *App) followUser(w http.ResponseWriter,r *http.Request) {
         SELECT $1,id FROM users WHERE id=$2 AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=id) OR (b.blocker_id=id AND b.blocked_id=$1)) ON CONFLICT DO NOTHING`,uid(r),id)
     if err!=nil { fail(w,500,"could not follow user"); return }
     n,_:=res.RowsAffected()
-    if n==0 { var exists bool; _=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)",id).Scan(&exists); if !exists { fail(w,404,"user not found"); return } }
+    if n==0 {
+        var exists bool
+        if checkErr := a.db.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)", id).Scan(&exists); checkErr != nil {
+            fail(w,500,"could not verify user"); return
+        }
+        if !exists { fail(w,404,"user not found"); return }
+        var blocked bool
+        if checkErr := a.db.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM user_blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1))", uid(r), id).Scan(&blocked); checkErr != nil {
+            fail(w,500,"could not verify block status"); return
+        }
+        if blocked { fail(w,403,"user interaction is blocked"); return }
+    }
     if n>0 { _,_=a.db.ExecContext(r.Context(),"INSERT INTO notifications(recipient_id,actor_id,kind) VALUES($1,$2,'follow')",id,uid(r)) }
     writeJSON(w,200,map[string]any{"following":true})
 }
