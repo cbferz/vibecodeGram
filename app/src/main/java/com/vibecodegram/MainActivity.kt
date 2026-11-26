@@ -65,65 +65,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 
-@Composable
-private fun GlassPopupMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    theme: Palette,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    if (!expanded) return
-
-    Popup(
-        alignment = Alignment.Center,
-        onDismissRequest = onDismissRequest,
-        properties = PopupProperties(
-            focusable = true,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true
-        )
-    ) {
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(animationSpec = tween(135)) + scaleIn(
-                initialScale = .72f,
-                transformOrigin = TransformOrigin(1f, .5f),
-                animationSpec = tween(190)
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 224.dp)
-                    .liquidGlass(theme, RoundedCornerShape(20.dp), .88f)
-                    .padding(7.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-                content = content
-            )
-        }
-    }
-}
-
-@Composable
-private fun GlassMenuItem(
-    icon: ImageVector,
-    label: String,
-    theme: Palette,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlass(theme, RoundedCornerShape(13.dp), .62f)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = theme.accent, modifier = Modifier.size(19.dp))
-        Spacer(Modifier.width(11.dp))
-        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
 private data class Palette(val name: String, val background: Color, val surface: Color, val accent: Color, val secondary: Color, val glow: Color)
 
 private val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
@@ -139,7 +80,6 @@ private val accents = listOf(Color(0xFFE6EAF2), Color(0xFF69C9FF), Color(0xFFC5A
 
 private data class Destination(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String)
 private data class Chat(val name: String, val message: String, val time: String, val unread: Int, val online: Boolean, val group: Boolean = false, val id: Long = -1L)
-private data class Post(val author: String, val handle: String, val time: String, val text: String, val tag: String, val likes: Int)
 private data class LocalChatMessage(val id: Long, val text: String, val time: String, val outgoing: Boolean)
 
 class MainActivity : ComponentActivity() {
@@ -221,6 +161,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
         }
         if (profileEditor) {
             ProfileColorEditor(
+                username = currentUser!!.username,
                 hue = profileHue, saturation = profileSaturation, brightness = profileBrightness,
                 gradient = profileGradient, theme = theme,
                 onHue = { profileHue = it; prefs.edit().putFloat("profile_hue", it).apply() },
@@ -592,43 +533,6 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, api: ApiClient, currentUs
 
 
 @Composable
-private fun VideosScreen(theme: Palette, bottomInset: androidx.compose.ui.unit.Dp) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { GlassCard(theme) {
-            Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(theme.glow, theme.surface, theme.accent.copy(alpha = .24f)))), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.PlayCircle, null, tint = theme.accent, modifier = Modifier.size(52.dp))
-                    Text("Видео и клипы", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                    Text("Тут появится твоя видеолента", color = theme.secondary, fontSize = 12.sp)
-                }
-            }
-        } }
-        item { Text("Вертикальные видео, подборки и авторские каналы — отдельное пространство для просмотра.", color = theme.secondary, fontSize = 14.sp, lineHeight = 21.sp) }
-    }
-}
-
-@Composable
-private fun ExploreScreen(theme: Palette, search: String, onSearch: (String) -> Unit, bottomInset: androidx.compose.ui.unit.Dp) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        OutlinedTextField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Найти темы и авторов") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp))
-        Text("Открывай новое", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 18.dp))
-        val topics = listOf("Технологии" to "12,4 тыс. публикаций", "Музыка" to "8,2 тыс. публикаций", "Фотография" to "5,7 тыс. публикаций", "Игры" to "4,9 тыс. публикаций", "Дизайн" to "3,1 тыс. публикаций")
-        LazyColumn(contentPadding = PaddingValues(bottom = bottomInset + 9.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            items(topics.filter { it.first.contains(search, true) }) { topic ->
-                GlassCard(theme) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(theme.accent.copy(alpha = .14f)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Tag, null, tint = theme.accent) }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) { Text("#${topic.first}", color = Color.White, fontWeight = FontWeight.SemiBold); Text(topic.second, color = theme.secondary, fontSize = 11.sp) }
-                        Icon(Icons.Default.ChevronRight, null, tint = theme.secondary)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ProfileScreen(
     theme: Palette,
     paletteIndex: Int,
@@ -744,6 +648,7 @@ private fun SessionManagerCard(theme: Palette, api: ApiClient) {
 }
 @Composable
 private fun ProfileColorEditor(
+    username: String,
     hue: Float,
     saturation: Float,
     brightness: Float,
@@ -776,7 +681,7 @@ private fun ProfileColorEditor(
                             Text("V", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
                         }
                         Spacer(Modifier.width(12.dp))
-                        Column { Text("Твой профиль", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("@your_username", color = Color.White.copy(alpha = .8f), fontSize = 12.sp) }
+                        Column { Text("Твой профиль", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("@$username", color = Color.White.copy(alpha = .8f), fontSize = 12.sp) }
                     }
                 }
                 Spacer(Modifier.height(18.dp))
@@ -851,16 +756,6 @@ private fun ServerStatusCard(theme: Palette) {
         }
         if (checking) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
         else Icon(if (healthy == true) Icons.Default.CheckCircle else Icons.Default.CloudOff, null, tint = if (healthy == true) Color(0xFF65D6B0) else theme.secondary)
-    }
-}
-
-@Composable
-private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, theme: Palette) {
-    Row(Modifier.fillMaxWidth().clickable { }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = theme.accent, modifier = Modifier.size(19.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(label, color = Color.White, modifier = Modifier.weight(1f), fontSize = 14.sp)
-        Icon(Icons.Default.ChevronRight, null, tint = theme.secondary)
     }
 }
 
