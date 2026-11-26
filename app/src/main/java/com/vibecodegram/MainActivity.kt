@@ -1250,26 +1250,48 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val diagnostics = remember { context.getSharedPreferences("vibecodegram-diagnostics", Context.MODE_PRIVATE) }
+    fun markAuthStage(stage: String, detail: String = "") {
+        diagnostics.edit().putString("auth_stage", stage).putString("auth_detail", detail.take(500))
+            .putLong("auth_stage_time", System.currentTimeMillis()).apply()
+    }
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(theme.glow.copy(alpha=.28f), theme.background, theme.background))).padding(24.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(28.dp), .92f).padding(22.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("vibecodeGram", color=Color.White, fontSize=29.sp, fontWeight=FontWeight.Black)
             Text(if(register) "Создай аккаунт" else "С возвращением", color=theme.accent, fontSize=19.sp, fontWeight=FontWeight.Bold)
             Text("Аккаунт и переписки синхронизируются через сервер.", color=theme.secondary, fontSize=12.sp)
             if(register) OutlinedTextField(displayName,{displayName=it},modifier=Modifier.fillMaxWidth(),label={Text("Имя")},singleLine=true)
-            OutlinedTextField(username,{username=it.lowercase().filter { c -> c.isLetterOrDigit() || c=='_' }},modifier=Modifier.fillMaxWidth(),label={Text("Логин")},singleLine=true)
+            OutlinedTextField(username,{username=it.lowercase().filter { c -> c in 'a'..'z' || c in '0'..'9' || c=='_' }},modifier=Modifier.fillMaxWidth(),label={Text("Логин (латиница, цифры, _)")},singleLine=true)
             OutlinedTextField(password,{password=it},modifier=Modifier.fillMaxWidth(),label={Text("Пароль")},singleLine=true,visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())
             if(error!=null) Text(error!!,color=Color(0xFFFF8294),fontSize=12.sp)
             Button(onClick={
                 error=null
-                if(username.length !in 3..32 || password.length !in 10..72 || (register && displayName.length>64)) {
-                    error="Логин: 3–32 символа. Пароль: минимум 10 символов."
+                val login = username.trim().lowercase()
+                val passwordBytes = password.toByteArray(Charsets.UTF_8).size
+                val displayNameBytes = displayName.trim().toByteArray(Charsets.UTF_8).size
+                if (!login.matches(Regex("[a-z0-9_]{3,32}"))) {
+                    error="Логин: 3–32 символа, только латиница, цифры и _."
+                } else if (passwordBytes !in 10..72) {
+                    error="Пароль должен занимать от 10 до 72 байт."
+                } else if (register && displayNameBytes > 64) {
+                    error="Имя слишком длинное (максимум 64 байта)."
                 } else {
                     busy=true
+                    markAuthStage(if (register) "register_started" else "login_started")
                     scope.launch {
-                        runCatching { api.authenticate(username,password,displayName,register) }
-                            .onSuccess { onAuthenticated(it.user) }
-                            .onFailure { error=it.message ?: "Не удалось выполнить запрос" }
-                        busy=false
+                        try {
+                            markAuthStage("auth_request_sending")
+                            val result = api.authenticate(login,password,displayName,register)
+                            markAuthStage("auth_api_success", "user_id=${result.user.id}")
+                            onAuthenticated(result.user)
+                            markAuthStage("auth_state_updated", "user_id=${result.user.id}")
+                        } catch (e: Exception) {
+                            val message = e.message ?: e.javaClass.simpleName
+                            markAuthStage("auth_failed", message)
+                            error=message
+                        } finally {
+                            busy=false
+                        }
                     }
                 }
             },modifier=Modifier.fillMaxWidth(),enabled=!busy) {
@@ -1284,7 +1306,18 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
                 val report = runCatching {
                     context.openFileInput("vibecodegram-crash.txt").bufferedReader().use { it.readText() }
                 }.getOrElse {
-                    "Последний аварийный отчёт не найден. Устройство: ${Build.MANUFACTURER} ${Build.MODEL}; Android API ${Build.VERSION.SDK_INT}; версия ${BuildConfig.VERSION_NAME}."
+                    val stage = diagnostics.getString("auth_stage", "не записан")
+                    val detail = diagnostics.getString("auth_detail", "")
+                    val stageTime = diagnostics.getLong("auth_stage_time", 0L)
+                    buildString {
+                        appendLine("Аварийный отчёт отсутствует; сохранена диагностика этапа.")
+                        appendLine("Устройство: ${Build.MANUFACTURER} ${Build.MODEL}")
+                        appendLine("Android API: ${Build.VERSION.SDK_INT}")
+                        appendLine("Версия: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                        appendLine("Последний этап: $stage")
+                        if (detail.isNotBlank()) appendLine("Детали: $detail")
+                        if (stageTime > 0L) appendLine("Время: ${java.util.Date(stageTime)}")
+                    }
                 }
                 runCatching {
                     val intent = Intent(Intent.ACTION_SEND).apply {
