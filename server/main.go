@@ -45,6 +45,7 @@ func main() {
  ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second); defer cancel()
  for { if err=db.PingContext(ctx); err==nil { break }; if ctx.Err()!=nil { log.Fatal("database unavailable: ",err) }; time.Sleep(time.Second) }
  if err=runMigrations(ctx,db); err!=nil { log.Fatal("database migrations: ",err) }
+ startStoryCleanup(db)
  a:=&App{db:db,jwtSecret:[]byte(secret)}
  if founderRaw:=strings.TrimSpace(os.Getenv("FOUNDER_USER_ID")); founderRaw!="" { if founderID,parseErr:=strconv.ParseInt(founderRaw,10,64); parseErr==nil && founderID>0 { if _,seedErr:=db.ExecContext(ctx,"INSERT INTO user_badges(user_id,badge_code) SELECT id,'founder' FROM users WHERE id=$1 ON CONFLICT DO NOTHING",founderID); seedErr!=nil { log.Fatal("founder badge bootstrap: ",seedErr) } } }
  r:=chi.NewRouter(); r.Use(middleware.RequestID,middleware.RealIP,middleware.Recoverer,middleware.Timeout(2*time.Minute))
@@ -182,3 +183,36 @@ func (a *App) listMessages(w http.ResponseWriter,r *http.Request){id,e:=conversa
 func (a *App) sendMessage(w http.ResponseWriter,r *http.Request){id,e:=conversationID(r);if e!=nil||!a.member(r,id){fail(w,404,"conversation not found");return};var in struct{Body string `json:"body"`};if decode(r,&in)!=nil{fail(w,400,"invalid request");return};in.Body=strings.TrimSpace(in.Body);if len(in.Body)==0||len(in.Body)>10000{fail(w,400,"message must be 1-10000 bytes");return};var mid int64;var at time.Time;e=a.db.QueryRowContext(r.Context(),"INSERT INTO messages(conversation_id,sender_id,body) VALUES($1,$2,$3) RETURNING id,created_at",id,uid(r),in.Body).Scan(&mid,&at);if e!=nil{fail(w,500,"could not send message");return};_,_=a.db.ExecContext(r.Context(),"INSERT INTO notifications(recipient_id,actor_id,kind) SELECT user_id,$2,'message' FROM conversation_members WHERE conversation_id=$1 AND user_id<>$2",id,uid(r));writeJSON(w,201,map[string]any{"id":mid,"conversation_id":id,"sender_id":uid(r),"body":in.Body,"created_at":at})}
 var upgrader=websocket.Upgrader{ReadBufferSize:1024,WriteBufferSize:1024,CheckOrigin:func(r *http.Request)bool{return r.Header.Get("Origin")==""}}
 func (a *App) websocket(w http.ResponseWriter,r *http.Request){c,e:=a.parseClaims(r.URL.Query().Get("token"));if e!=nil{fail(w,401,"authentication required");return};var active bool;if e=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM sessions WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL AND expires_at>NOW())",c.SessionID,c.UserID).Scan(&active);e!=nil||!active{fail(w,401,"session expired or revoked");return};conn,e:=upgrader.Upgrade(w,r,nil);if e!=nil{return};defer conn.Close();_ = conn.WriteJSON(map[string]any{"type":"connected","user_id":c.UserID});for{if _,_,e=conn.ReadMessage();e!=nil{return}}}
+
+
+// startStoryCleanup removes expired Stories away from the read path.
+// Batches keep each transaction short and avoid making feed requests perform writes.
+func startStoryCleanup(db *sql.DB) {
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			for {
+				result, err := db.ExecContext(ctx, `
+					DELETE FROM stories
+					WHERE id IN (
+						SELECT id FROM stories
+						WHERE expires_at <= NOW()
+						ORDER BY expires_at
+						LIMIT 500
+					)
+				`)
+				if err != nil {
+					log.Printf("expired story cleanup failed: %v", err)
+					break
+				}
+				deleted, err := result.RowsAffected()
+				if err != nil || deleted < 500 || ctx.Err() != nil {
+					break
+				}
+			}
+			cancel()
+		}
+	}()
+}

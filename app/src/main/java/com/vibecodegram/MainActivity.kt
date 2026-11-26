@@ -6,8 +6,14 @@ import android.graphics.BitmapFactory
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.widget.MediaController
 import android.widget.VideoView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
@@ -76,6 +82,18 @@ import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
 
+
+private fun createMedia3Player(context: Context, token: String?): ExoPlayer {
+    val headers = token?.takeIf { it.isNotBlank() }?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+    val dataSourceFactory = DefaultHttpDataSource.Factory()
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(30_000)
+        .setDefaultRequestProperties(headers)
+    return ExoPlayer.Builder(context)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+        .build()
+}
 
 private data class Palette(val name: String, val background: Color, val surface: Color, val accent: Color, val secondary: Color, val glow: Color)
 
@@ -280,22 +298,69 @@ private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, de
 private fun ReelsScreen(theme: Palette, api: ApiClient) {
     var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var composer by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { posts.size })
+    val player = remember(api.token) { createMedia3Player(context, api.token) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var muted by remember { mutableStateOf(false) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
 
     LaunchedEffect(api.token, refreshKey) {
-        loading = posts.isEmpty()
+        loading = true
         error = null
-        runCatching { api.posts("videos") }
-            .onSuccess { posts = it.filter { post -> post.videoUrl.isNotBlank() } }
-            .onFailure { error = it.message ?: "Не удалось загрузить видео" }
+        runCatching { api.reels(0, 20) }
+            .onSuccess {
+                posts = it.filter { post -> post.contentKind == "reel" && post.videoUrl.isNotBlank() }
+                if (posts.isEmpty()) player.stop()
+            }
+            .onFailure { error = it.message ?: "Не удалось загрузить Reels" }
         loading = false
     }
 
+    LaunchedEffect(pagerState.currentPage, posts.size) {
+        if (posts.isNotEmpty() && !loadingMore && pagerState.currentPage >= posts.size - 4) {
+            loadingMore = true
+            runCatching { api.reels(posts.size, 20) }
+                .onSuccess { next ->
+                    val unique = next.filter { item -> item.contentKind == "reel" && item.videoUrl.isNotBlank() && posts.none { old -> old.id == item.id } }
+                    if (unique.isNotEmpty()) posts = posts + unique
+                }
+                .onFailure { if (posts.isEmpty()) error = it.message }
+            loadingMore = false
+        }
+    }
+
+    val activePost = posts.getOrNull(pagerState.currentPage)
+    LaunchedEffect(activePost?.id) {
+        if (activePost == null) {
+            player.pause()
+        } else {
+            val url = BuildConfig.API_BASE_URL.trimEnd('/') + activePost.videoUrl
+            player.repeatMode = Player.REPEAT_MODE_ONE
+            player.volume = if (muted) 0f else 1f
+            player.setMediaItem(MediaItem.fromUri(url))
+            player.prepare()
+            player.playWhenReady = true
+        }
+    }
+
     when {
-        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        loading && posts.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = theme.accent)
         }
         error != null && posts.isEmpty() -> Column(
@@ -315,36 +380,39 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
         ) {
             Icon(Icons.Default.VideoLibrary, null, tint = theme.secondary, modifier = Modifier.size(48.dp))
             Spacer(Modifier.height(12.dp))
-            Text("Пока нет коротких видео", color = Color.White, fontWeight = FontWeight.SemiBold)
-            Text("Видео из публикаций появятся здесь автоматически.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
-            TextButton(onClick = { refreshKey++ }) { Text("Обновить", color = theme.accent) }
+            Text("Reels пока нет", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text("Короткие видео публикуются отдельно от видео в обычных постах.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+            TextButton(onClick = { composer = true }) { Text("Создать Reels", color = theme.accent) }
+            TextButton(onClick = { refreshKey++ }) { Text("Обновить", color = theme.secondary) }
         }
         else -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize(), key = { index -> posts[index].id }) { index ->
                 val post = posts[index]
-                val videoUrl = BuildConfig.API_BASE_URL.trimEnd('/') + post.videoUrl
                 var liked by remember(post.id) { mutableStateOf(post.liked) }
                 var saved by remember(post.id) { mutableStateOf(post.saved) }
                 var likes by remember(post.id) { mutableLongStateOf(post.likes) }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            VideoView(ctx).apply {
-                                setVideoURI(Uri.parse(videoUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
-                                setOnPreparedListener { player -> player.isLooping = true; if (index == pagerState.currentPage) start() }
-                                setOnErrorListener { _, _, _ -> true }
-                            }
-                        },
-                        update = { view ->
-                            if (index == pagerState.currentPage && !view.isPlaying) view.start()
-                            if (index != pagerState.currentPage && view.isPlaying) view.pause()
-                        }
-                    )
+                    if (index == pagerState.currentPage) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    this.player = player
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                                }
+                            },
+                            update = { view ->
+                                if (view.player !== player) view.player = player
+                            },
+                            onRelease = { view -> view.player = null }
+                        )
+                    }
                     Column(
                         Modifier.align(Alignment.BottomStart).fillMaxWidth()
                             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f))))
-                            .padding(start = 20.dp, end = 72.dp, top = 48.dp, bottom = 30.dp)
+                            .padding(start = 20.dp, end = 88.dp, top = 48.dp, bottom = 30.dp)
                     ) {
                         Text("@${post.username}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         if (post.body.isNotBlank()) {
@@ -362,8 +430,19 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         IconButton(onClick = {
+                            if (player.isPlaying) player.pause() else player.play()
+                        }) {
+                            Icon(if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled, "Воспроизведение", tint = Color.White, modifier = Modifier.size(30.dp))
+                        }
+                        IconButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f }) {
+                            Icon(if (muted) Icons.Default.VolumeOff else Icons.Default.VolumeUp, "Звук", tint = Color.White, modifier = Modifier.size(25.dp))
+                        }
+                        IconButton(onClick = {
                             scope.launch {
-                                runCatching { api.toggleLike(post.id) }.onSuccess { result -> liked = result.first; likes = result.second }
+                                runCatching { api.toggleLike(post.id) }.onSuccess { result ->
+                                    liked = result.first
+                                    likes = result.second
+                                }
                             }
                         }) {
                             Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Нравится", tint = if (liked) Color(0xFFFF7895) else Color.White, modifier = Modifier.size(27.dp))
@@ -374,7 +453,7 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                                 runCatching { api.setSaved(post.id, !saved) }.onSuccess { saved = !saved }
                             }
                         }) {
-                            Icon(if (saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, "Сохранить", tint = if (saved) theme.accent else Color.White, modifier = Modifier.size(25.dp))
+                            Icon(if (saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, "Сохранить", tint = if (saved) theme.accent else Color.White, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -384,9 +463,32 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Reels", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+                IconButton(onClick = { composer = true }) { Icon(Icons.Default.Add, "Создать Reels", tint = Color.White) }
                 IconButton(onClick = { refreshKey++ }) { Icon(Icons.Default.Refresh, "Обновить Reels", tint = Color.White) }
             }
         }
+    }
+
+    if (composer) {
+        CreatePostDialog(
+            theme = theme,
+            title = "Новое Reels",
+            publishLabel = "Опубликовать Reels",
+            requireVideo = true,
+            onDismiss = { composer = false },
+            onPublish = { body, tag, videoUri ->
+                scope.launch {
+                    runCatching {
+                        api.createPost(body.ifBlank { "Reels" }, tag, videoUri, context, isReel = true)
+                        api.reels(0, 20)
+                    }.onSuccess { rows ->
+                        posts = rows.filter { it.contentKind == "reel" && it.videoUrl.isNotBlank() }
+                        composer = false
+                        pagerState.scrollToPage(0)
+                    }.onFailure { error = it.message ?: "Не удалось опубликовать Reels" }
+                }
+            }
+        )
     }
 }
 
@@ -825,31 +927,29 @@ private fun PostVideoPlayer(post: ApiPost, theme: Palette, api: ApiClient) {
             }
         }
     } else {
-        val videoView = remember(post.id) { VideoView(context) }
-        DisposableEffect(videoView) {
-            onDispose { videoView.stopPlayback() }
+        val player = remember(post.id) { createMedia3Player(context, api.token) }
+        DisposableEffect(player) {
+            onDispose { player.release() }
+        }
+        LaunchedEffect(player, videoUrl) {
+            player.repeatMode = Player.REPEAT_MODE_OFF
+            player.setMediaItem(MediaItem.fromUri(videoUrl))
+            player.prepare()
+            player.playWhenReady = true
         }
         AndroidView(
             modifier = Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(18.dp)),
             factory = { ctx ->
-                videoView.apply {
-                    val controller = MediaController(ctx)
-                    controller.setAnchorView(this)
-                    setMediaController(controller)
-                    setVideoURI(
-                        Uri.parse(videoUrl),
-                        mapOf("Authorization" to "Bearer ${api.token.orEmpty()}")
-                    )
-                    setOnPreparedListener { player ->
-                        player.isLooping = false
-                        start()
-                    }
-                    setOnErrorListener { _, _, _ ->
-                        playing = false
-                        true
-                    }
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                    keepScreenOn = true
                 }
-            }
+            },
+            update = { view -> if (view.player !== player) view.player = player },
+            onRelease = { view -> view.player = null }
         )
     }
 }
@@ -981,6 +1081,9 @@ private fun FeedPostCard(
 @Composable
 private fun CreatePostDialog(
     theme: Palette,
+    title: String = "Новая публикация",
+    publishLabel: String = "Опубликовать",
+    requireVideo: Boolean = false,
     onDismiss: () -> Unit,
     onPublish: (String, String, Uri?) -> Unit
 ) {
@@ -996,7 +1099,7 @@ private fun CreatePostDialog(
         modifier = Modifier.liquidGlass(theme, RoundedCornerShape(26.dp), .94f),
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
-        title = { Text("Новая публикация", color = Color.White, fontWeight = FontWeight.Bold) },
+        title = { Text(title, color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -1030,9 +1133,9 @@ private fun CreatePostDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = (body.isNotBlank() || selectedVideo != null) && !busy,
+                enabled = (if (requireVideo) selectedVideo != null else body.isNotBlank() || selectedVideo != null) && !busy,
                 onClick = { busy = true; onPublish(body.trim(), tag.trim(), selectedVideo) }
-            ) { Text("Опубликовать", color = theme.accent) }
+            ) { Text(publishLabel, color = theme.accent) }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Отмена", color = theme.secondary) } }
     )

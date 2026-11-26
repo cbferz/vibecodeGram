@@ -66,8 +66,6 @@ jobs:
             'platform-tools'
             'platforms;android-37.0'
             'build-tools;37.0.0'
-            'cmake;3.22.1'
-            'ndk;27.2.12479018'
           )
           missing=()
           for package in "${packages[@]}"; do
@@ -75,8 +73,6 @@ jobs:
               platform-tools) target="$SDK_ROOT/platform-tools" ;;
               platforms\;android-37.0) target="$SDK_ROOT/platforms/android-37.0" ;;
               build-tools\;37.0.0) target="$SDK_ROOT/build-tools/37.0.0" ;;
-              cmake\;3.22.1) target="$SDK_ROOT/cmake/3.22.1" ;;
-              ndk\;27.2.12479018) target="$SDK_ROOT/ndk/27.2.12479018" ;;
               *) echo "Unknown SDK component: $package" >&2; exit 1 ;;
             esac
             [[ -d "$target" ]] || missing+=("$package")
