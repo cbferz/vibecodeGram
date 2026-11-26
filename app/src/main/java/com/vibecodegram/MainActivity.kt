@@ -389,6 +389,7 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
             VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize(), key = { index -> posts[index].id }) { index ->
                 val post = posts[index]
                 var liked by remember(post.id) { mutableStateOf(post.liked) }
+                var saved by remember(post.id) { mutableStateOf(post.saved) }
                 var likes by remember(post.id) { mutableLongStateOf(post.likes) }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     if (index == pagerState.currentPage) {
@@ -396,7 +397,7 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                             modifier = Modifier.fillMaxSize(),
                             factory = { ctx ->
                                 PlayerView(ctx).apply {
-                                    player = player
+                                    this.player = player
                                     useController = false
                                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                                     setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
@@ -447,6 +448,13 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                             Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Нравится", tint = if (liked) Color(0xFFFF7895) else Color.White, modifier = Modifier.size(27.dp))
                         }
                         Text(likes.toString(), color = Color.White, fontSize = 11.sp)
+                        IconButton(onClick = {
+                            scope.launch {
+                                runCatching { api.setSaved(post.id, !saved) }.onSuccess { saved = !saved }
+                            }
+                        }) {
+                            Icon(if (saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, "Сохранить", tint = if (saved) theme.accent else Color.White, modifier = Modifier.size(24.dp))
+                        }
                     }
                 }
             }
