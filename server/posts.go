@@ -16,6 +16,7 @@ func (a *App) registerPostRoutes(r chi.Router) {
 	r.Put("/posts/{id}/save", a.savePost)
 	r.Delete("/posts/{id}/save", a.unsavePost)
 	r.Post("/posts/{id}/hide", a.hidePost)
+	r.Delete("/posts/{id}/hide", a.unhidePost)
 }
 
 func postID(r *http.Request) (int64, bool) {
@@ -30,15 +31,18 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 		order = "likes_count DESC, p.created_at DESC, p.id DESC"
 	}
 	whereSaved := ""
+	whereHidden := " AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)"
 	if sortMode == "saved" {
 		whereSaved = " AND EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)"
+	} else if sortMode == "hidden" {
+		whereHidden = " AND EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)"
 	}
 	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
 		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id),
 		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
 		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)
 		FROM posts p JOIN users u ON u.id=p.author_id
-		WHERE NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)` + whereSaved + `
+		WHERE 1=1` + whereHidden + whereSaved + `
 		ORDER BY ` + order + ` LIMIT 100`
 	rows, err := a.db.QueryContext(r.Context(), query, uid(r))
 	if err != nil { fail(w, 500, "could not load feed"); return }
@@ -103,6 +107,15 @@ func (a *App) hidePost(w http.ResponseWriter,r *http.Request) {
 	if err!=nil { fail(w,500,"could not hide post"); return }
 	n,_:=res.RowsAffected(); if n==0 { var exists bool; _=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM posts WHERE id=$1)",id).Scan(&exists); if !exists { fail(w,404,"post not found"); return } }
 	writeJSON(w,200,map[string]any{"hidden":true})
+}
+
+func (a *App) unhidePost(w http.ResponseWriter, r *http.Request) {
+	id, ok := postID(r)
+	if !ok { fail(w, 400, "invalid post id"); return }
+	if _, err := a.db.ExecContext(r.Context(), "DELETE FROM hidden_posts WHERE post_id=$1 AND user_id=$2", id, uid(r)); err != nil {
+		fail(w, 500, "could not restore post"); return
+	}
+	writeJSON(w, 200, map[string]any{"hidden": false})
 }
 
 func (a *App) searchUsers(w http.ResponseWriter, r *http.Request) {
