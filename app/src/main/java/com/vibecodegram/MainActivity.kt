@@ -388,6 +388,8 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
         else -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize(), key = { index -> posts[index].id }) { index ->
                 val post = posts[index]
+                var liked by remember(post.id) { mutableStateOf(post.liked) }
+                var likes by remember(post.id) { mutableLongStateOf(post.likes) }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     if (index == pagerState.currentPage) {
                         AndroidView(
@@ -436,12 +438,15 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                         }
                         IconButton(onClick = {
                             scope.launch {
-                                runCatching { api.toggleLike(post.id) }
+                                runCatching { api.toggleLike(post.id) }.onSuccess { result ->
+                                    liked = result.first
+                                    likes = result.second
+                                }
                             }
                         }) {
-                            Icon(if (post.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Нравится", tint = if (post.liked) Color(0xFFFF7895) else Color.White, modifier = Modifier.size(27.dp))
+                            Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Нравится", tint = if (liked) Color(0xFFFF7895) else Color.White, modifier = Modifier.size(27.dp))
                         }
-                        Text(post.likes.toString(), color = Color.White, fontSize = 11.sp)
+                        Text(likes.toString(), color = Color.White, fontSize = 11.sp)
                     }
                 }
             }
