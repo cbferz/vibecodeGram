@@ -54,7 +54,7 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 		v.mime_type,v.byte_size
 		FROM posts p JOIN users u ON u.id=p.author_id
 		LEFT JOIN post_videos v ON v.post_id=p.id
-		WHERE 1=1` + whereHidden + whereSaved + whereVideo + `
+		WHERE NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))` + whereHidden + whereSaved + whereVideo + `
 		ORDER BY ` + order + ` LIMIT 100`
 	rows, err := a.db.QueryContext(r.Context(), query, uid(r))
 	if err != nil { fail(w, 500, "could not load feed"); return }
