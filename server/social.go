@@ -127,7 +127,24 @@ func (a *App) viewStory(w http.ResponseWriter,r *http.Request) {
         ON CONFLICT DO NOTHING`,id,uid(r))
     if err!=nil { fail(w,500,"could not record story view"); return }
     n,_:=result.RowsAffected()
-    if n==0 { var exists bool; _=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM stories WHERE id=$1 AND expires_at>NOW())",id).Scan(&exists); if !exists { fail(w,404,"story not found"); return } }
+    if n==0 {
+        var accessible bool
+        checkErr := a.db.QueryRowContext(r.Context(), `
+            SELECT EXISTS(
+                SELECT 1 FROM stories s
+                WHERE s.id=$1 AND s.expires_at>NOW()
+                  AND (s.author_id=$2 OR EXISTS(
+                    SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=s.author_id
+                  ))
+                  AND NOT EXISTS(
+                    SELECT 1 FROM user_blocks b
+                    WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id)
+                       OR (b.blocker_id=s.author_id AND b.blocked_id=$2)
+                  )
+            )
+        `, id, uid(r)).Scan(&accessible)
+        if checkErr != nil || !accessible { fail(w,404,"story not found"); return }
+    }
     writeJSON(w,200,map[string]any{"viewed":true})
 }
 
