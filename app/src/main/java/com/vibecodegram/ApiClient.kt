@@ -81,6 +81,9 @@ class ApiClient(private val prefs: SharedPreferences) {
     suspend fun hidePost(postId: Long) {
         call("POST", "/v1/posts/$postId/hide", JSONObject())
     }
+    suspend fun unhidePost(postId: Long) {
+        call("DELETE", "/v1/posts/$postId/hide")
+    }
     suspend fun searchUsers(query: String): List<ApiUser> {
         val arr = JSONArray(call("GET", "/v1/users/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")))
         return (0 until arr.length()).map { i -> parseUser(arr.getJSONObject(i)) }
