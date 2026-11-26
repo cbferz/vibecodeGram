@@ -357,16 +357,11 @@ private fun FeedPostCard(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.background(theme.surface).widthIn(min = 190.dp)
+                    modifier = Modifier.liquidGlass(theme, RoundedCornerShape(18.dp), .96f).widthIn(min = 190.dp)
                 ) {
                     DropdownMenuItem(
-                        text = { Text(if (post.saved) "Убрать из сохранённого" else "Сохранить") },
-                        leadingIcon = { Icon(if (post.saved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
-                        onClick = { menuExpanded = false; onSave() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Скрыть публикацию") },
-                        leadingIcon = { Icon(Icons.Default.VisibilityOff, null) },
+                        text = { Text("Скрыть публикацию", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Default.VisibilityOff, null, tint = theme.secondary) },
                         onClick = { menuExpanded = false; onHide() }
                     )
                 }
@@ -635,6 +630,18 @@ private fun ProfileScreen(
     val profileColor = Color.hsv(profileHue, profileSaturation, profileBrightness)
     val profileDeep = Color.hsv((profileHue + 34f) % 360f, (profileSaturation * .92f).coerceIn(0f, 1f), (profileBrightness * .43f).coerceIn(.08f, 1f))
     val profileBrush = if (profileGradient) Brush.linearGradient(listOf(profileColor, profileDeep, profileColor.copy(alpha = .72f))) else Brush.linearGradient(listOf(profileColor, profileColor))
+    var savedPosts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var savedLoading by remember { mutableStateOf(true) }
+    var savedError by remember { mutableStateOf<String?>(null) }
+    val savedScope = rememberCoroutineScope()
+    LaunchedEffect(api.token) {
+        savedLoading = true
+        savedError = null
+        runCatching { api.posts("saved") }
+            .onSuccess { savedPosts = it }
+            .onFailure { savedError = it.message ?: "Не удалось загрузить избранное" }
+        savedLoading = false
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(8.dp))
         Column(
@@ -669,6 +676,64 @@ private fun ProfileScreen(
                 Spacer(Modifier.width(8.dp))
                 Text("Цвет профиля")
             }
+        }
+        Spacer(Modifier.height(12.dp))
+        GlassCard(theme) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Bookmark, null, tint = theme.accent)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Избранное", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Твои сохранённые публикации", color = theme.secondary, fontSize = 11.sp)
+                }
+                IconButton(onClick = {
+                    savedScope.launch {
+                        savedLoading = true
+                        savedError = null
+                        runCatching { api.posts("saved") }
+                            .onSuccess { savedPosts = it }
+                            .onFailure { savedError = it.message ?: "Не удалось обновить избранное" }
+                        savedLoading = false
+                    }
+                }) { Icon(Icons.Default.Refresh, "Обновить избранное", tint = theme.accent) }
+            }
+            when {
+                savedLoading -> Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = theme.accent)
+                }
+                savedError != null -> Text(savedError!!, color = Color(0xFFFF8294), fontSize = 12.sp)
+                savedPosts.isEmpty() -> Text("Здесь будут публикации, которые ты сохранишь в ленте.", color = theme.secondary, fontSize = 12.sp)
+                else -> Text("Сохранено: ${savedPosts.size}", color = theme.secondary, fontSize = 11.sp)
+            }
+        }
+        savedPosts.forEach { savedPost ->
+            Spacer(Modifier.height(8.dp))
+            FeedPostCard(
+                post = savedPost,
+                theme = theme,
+                compact = false,
+                onLike = {
+                    savedScope.launch {
+                        runCatching { api.toggleLike(savedPost.id) }.onSuccess { result ->
+                            savedPosts = savedPosts.map { if (it.id == savedPost.id) it.copy(liked = result.first, likes = result.second) else it }
+                        }.onFailure { savedError = it.message ?: "Не удалось поставить отметку" }
+                    }
+                },
+                onSave = {
+                    savedScope.launch {
+                        runCatching { api.setSaved(savedPost.id, false) }.onSuccess {
+                            savedPosts = savedPosts.filterNot { it.id == savedPost.id }
+                        }.onFailure { savedError = it.message ?: "Не удалось убрать из избранного" }
+                    }
+                },
+                onHide = {
+                    savedScope.launch {
+                        runCatching { api.hidePost(savedPost.id) }.onSuccess {
+                            savedPosts = savedPosts.filterNot { it.id == savedPost.id }
+                        }.onFailure { savedError = it.message ?: "Не удалось скрыть публикацию" }
+                    }
+                }
+            )
         }
         Spacer(Modifier.height(12.dp))
         GlassCard(theme) {
