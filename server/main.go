@@ -155,7 +155,28 @@ func (a *App) me(w http.ResponseWriter,r *http.Request){var id int64;var u,n str
 type conversationInput struct{Kind string `json:"kind"`;Title string `json:"title"`;MemberIDs []int64 `json:"member_ids"`}
 func (a *App) createConversation(w http.ResponseWriter,r *http.Request){var in conversationInput;if decode(r,&in)!=nil{fail(w,400,"invalid request");return};if in.Kind!="direct"&&in.Kind!="group"{fail(w,400,"kind must be direct or group");return};if in.Kind=="group"&&strings.TrimSpace(in.Title)==""{fail(w,400,"group title is required");return};members:=map[int64]bool{uid(r):true};for _,id:=range in.MemberIDs{if id>0{members[id]=true}};if in.Kind=="direct"&&len(members)!=2{fail(w,400,"direct conversation requires exactly one other member");return};if len(members)>100{fail(w,400,"group limit is 100 members");return};tx,e:=a.db.BeginTx(r.Context(),nil);if e!=nil{fail(w,500,"database error");return};defer tx.Rollback();var id int64;e=tx.QueryRowContext(r.Context(),"INSERT INTO conversations(kind,title,created_by) VALUES($1,NULLIF($2,''),$3) RETURNING id",in.Kind,strings.TrimSpace(in.Title),uid(r)).Scan(&id);if e!=nil{fail(w,500,"could not create conversation");return};for member:=range members{if _,e=tx.ExecContext(r.Context(),"INSERT INTO conversation_members(conversation_id,user_id) SELECT $1,id FROM users WHERE id=$2",id,member);e!=nil{fail(w,400,"one or more members do not exist");return}};if e=tx.Commit();e!=nil{fail(w,500,"could not save conversation");return};writeJSON(w,201,map[string]any{"id":id,"kind":in.Kind,"title":in.Title})}
 func (a *App) listConversations(w http.ResponseWriter,r *http.Request){rows,e:=a.db.QueryContext(r.Context(),`SELECT c.id,c.kind,CASE WHEN c.kind='direct' THEN COALESCE((SELECT u.display_name FROM conversation_members other JOIN users u ON u.id=other.user_id WHERE other.conversation_id=c.id AND other.user_id<>$1 LIMIT 1),'') ELSE COALESCE(c.title,'') END,c.created_at,(SELECT COALESCE(m.body,'') FROM messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1),(SELECT m.created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) FROM conversations c JOIN conversation_members cm ON cm.conversation_id=c.id WHERE cm.user_id=$1 ORDER BY c.id DESC LIMIT 100`,uid(r));if e!=nil{fail(w,500,"database error");return};defer rows.Close();out:=make([]map[string]any,0);for rows.Next(){var id int64;var kind,title,last string;var created time.Time;var lastAt sql.NullTime;if rows.Scan(&id,&kind,&title,&created,&last,&lastAt)!=nil{fail(w,500,"database error");return};item:=map[string]any{"id":id,"kind":kind,"title":title,"created_at":created,"last_message":last};if lastAt.Valid{item["last_message_at"]=lastAt.Time};out=append(out,item)};writeJSON(w,200,out)}
-func (a *App) member(r *http.Request,id int64)bool{var ok bool;e:=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2)",id,uid(r)).Scan(&ok);return e==nil&&ok}
+func (a *App) member(r *http.Request, id int64) bool {
+	var ok bool
+	err := a.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1
+			FROM conversation_members mine
+			JOIN conversations c ON c.id=mine.conversation_id
+			WHERE mine.conversation_id=$1 AND mine.user_id=$2
+			  AND NOT (
+				c.kind='direct' AND EXISTS(
+					SELECT 1
+					FROM conversation_members other
+					JOIN user_blocks b ON
+						(b.blocker_id=$2 AND b.blocked_id=other.user_id)
+						OR (b.blocker_id=other.user_id AND b.blocked_id=$2)
+					WHERE other.conversation_id=c.id AND other.user_id<>$2
+				)
+			  )
+		)
+	`, id, uid(r)).Scan(&ok)
+	return err == nil && ok
+}
 func conversationID(r *http.Request)(int64,error){return strconv.ParseInt(chi.URLParam(r,"id"),10,64)}
 func (a *App) listMessages(w http.ResponseWriter,r *http.Request){id,e:=conversationID(r);if e!=nil||!a.member(r,id){fail(w,404,"conversation not found");return};limit,_:=strconv.Atoi(r.URL.Query().Get("limit"));if limit<1||limit>100{limit=50};before,_:=strconv.ParseInt(r.URL.Query().Get("before"),10,64);rows,e:=a.db.QueryContext(r.Context(),`SELECT m.id,m.sender_id,u.username,m.body,m.created_at FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=$1 AND ($2=0 OR m.id<$2) ORDER BY m.id DESC LIMIT $3`,id,before,limit);if e!=nil{fail(w,500,"database error");return};defer rows.Close();out:=make([]map[string]any,0);for rows.Next(){var mid,sender int64;var username,body string;var at time.Time;if rows.Scan(&mid,&sender,&username,&body,&at)!=nil{fail(w,500,"database error");return};out=append(out,map[string]any{"id":mid,"sender_id":sender,"username":username,"body":body,"created_at":at})};writeJSON(w,200,out)}
 func (a *App) sendMessage(w http.ResponseWriter,r *http.Request){id,e:=conversationID(r);if e!=nil||!a.member(r,id){fail(w,404,"conversation not found");return};var in struct{Body string `json:"body"`};if decode(r,&in)!=nil{fail(w,400,"invalid request");return};in.Body=strings.TrimSpace(in.Body);if len(in.Body)==0||len(in.Body)>10000{fail(w,400,"message must be 1-10000 bytes");return};var mid int64;var at time.Time;e=a.db.QueryRowContext(r.Context(),"INSERT INTO messages(conversation_id,sender_id,body) VALUES($1,$2,$3) RETURNING id,created_at",id,uid(r),in.Body).Scan(&mid,&at);if e!=nil{fail(w,500,"could not send message");return};_,_=a.db.ExecContext(r.Context(),"INSERT INTO notifications(recipient_id,actor_id,kind) SELECT user_id,$2,'message' FROM conversation_members WHERE conversation_id=$1 AND user_id<>$2",id,uid(r));writeJSON(w,201,map[string]any{"id":mid,"conversation_id":id,"sender_id":uid(r),"body":in.Body,"created_at":at})}
