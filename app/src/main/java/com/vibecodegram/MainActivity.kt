@@ -84,8 +84,31 @@ private data class LocalChatMessage(val id: Long, val text: String, val time: St
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashDiagnostics()
         super.onCreate(savedInstanceState)
         setContent { vibecodeGramApp(getSharedPreferences("appearance", Context.MODE_PRIVATE)) }
+    }
+
+    private fun installCrashDiagnostics() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val report = buildString {
+                    appendLine("vibecodeGram crash report")
+                    appendLine("Time: ${java.time.Instant.now()}")
+                    appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                    appendLine("Android API: ${Build.VERSION.SDK_INT}")
+                    appendLine("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    appendLine("Thread: ${thread.name}")
+                    appendLine()
+                    appendLine(android.util.Log.getStackTraceString(error))
+                }
+                openFileOutput("vibecodegram-crash.txt", Context.MODE_PRIVATE).use {
+                    it.write(report.toByteArray(Charsets.UTF_8))
+                }
+            }
+            previous?.uncaughtException(thread, error)
+        }
     }
 }
 
@@ -1061,7 +1084,9 @@ private fun LiquidGlassNavigationBar(
 
 @Composable
 private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser) -> Unit) {
+    val context = LocalContext.current
     var register by remember { mutableStateOf(false) }
+    var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
     var username by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -1098,6 +1123,24 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
                 Text(if(register) "Уже есть аккаунт? Войти" else "Нет аккаунта? Зарегистрироваться",color=theme.accent)
             }
             Text("Пароль хранится на сервере только в виде защищённого хеша.",color=theme.secondary,fontSize=10.sp)
+            TextButton(onClick = {
+                val report = runCatching {
+                    context.openFileInput("vibecodegram-crash.txt").bufferedReader().use { it.readText() }
+                }.getOrElse {
+                    "Последний аварийный отчёт не найден. Устройство: ${Build.MANUFACTURER} ${Build.MODEL}; Android API ${Build.VERSION.SDK_INT}; версия ${BuildConfig.VERSION_NAME}."
+                }
+                runCatching {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "vibecodeGram — диагностика")
+                        putExtra(Intent.EXTRA_TEXT, report)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Отправить отчёт"))
+                }.onFailure { diagnosticsMessage = it.message ?: "Не удалось открыть отправку отчёта" }
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("Отправить отчёт о сбое", color = theme.accent)
+            }
+            diagnosticsMessage?.let { Text(it, color = Color(0xFFFF8294), fontSize = 11.sp) }
         }
     }
 }
