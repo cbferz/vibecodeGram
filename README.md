@@ -25,6 +25,9 @@ The API listens on port 8080 inside the compose network. PostgreSQL is not publi
 - `POST /v1/auth/register` — create account (`username`, `password`, optional `display_name`).
 - `POST /v1/auth/login` — issue bearer token.
 - `GET /v1/me` — current account.
+- `POST /v1/posts/video` — publish an MP4 video post (multipart `body`, `tag`, `video`; max 50 MiB).
+- `GET /v1/posts?sort=videos` — list video posts.
+- `GET /v1/posts/{id}/video` — authenticated MP4 stream with byte-range support.
 - `GET /v1/me/badges` — verified badges for the authenticated account.
 - `GET /v1/devices/accounts?device_id=...` — accounts registered on this app installation.
 - `POST /v1/devices/accounts` — register the currently authenticated account on a device (`device_id`).
