@@ -122,16 +122,6 @@ class MainActivity : ComponentActivity() {
             previous?.uncaughtException(thread, error)
         }
     }
-    if (editProfile && profile != null) {
-        ProfileEditDialog(profile!!, theme, onDismiss = { editProfile = false }, onSave = { displayName, bio, avatar, cover, website, location ->
-            savedScope.launch {
-                profileError = null
-                runCatching { api.updateProfile(displayName, bio, avatar, cover, website, location); api.profile(user.id) }
-                    .onSuccess { profile = it; editProfile = false }
-                    .onFailure { profileError = it.message ?: "Не удалось сохранить профиль" }
-            }
-        })
-    }
 }
 
 @Composable
@@ -1394,6 +1384,16 @@ private fun ProfileScreen(
             }
             Divider(color = Color.White.copy(alpha = .08f))
         }
+    }
+    if (editProfile && profile != null) {
+        ProfileEditDialog(profile!!, theme, onDismiss = { editProfile = false }, onSave = { displayName, bio, avatar, cover, website, location ->
+            savedScope.launch {
+                profileError = null
+                runCatching { api.updateProfile(displayName, bio, avatar, cover, website, location); api.profile(user.id) }
+                    .onSuccess { profile = it; editProfile = false }
+                    .onFailure { profileError = it.message ?: "Не удалось сохранить профиль" }
+            }
+        })
     }
 }
 
