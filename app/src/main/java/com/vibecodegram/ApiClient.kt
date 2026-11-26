@@ -81,6 +81,13 @@ class ApiClient(private val prefs: SharedPreferences) {
     suspend fun hidePost(postId: Long) {
         call("POST", "/v1/posts/$postId/hide", JSONObject())
     }
+    suspend fun searchUsers(query: String): List<ApiUser> {
+        val arr = JSONArray(call("GET", "/v1/users/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")))
+        return (0 until arr.length()).map { i -> parseUser(arr.getJSONObject(i)) }
+    }
+    suspend fun createDirectConversation(userId: Long): Long {
+        return JSONObject(call("POST", "/v1/conversations", JSONObject().put("kind", "direct").put("member_ids", JSONArray().put(userId)))).getLong("id")
+    }
     suspend fun conversations(): List<ApiConversation> {
         val arr = JSONArray(call("GET", "/v1/conversations"))
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { ApiConversation(it.getLong("id"), it.optString("kind"), it.optString("title"), it.optString("last_message")) } }
