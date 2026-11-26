@@ -468,6 +468,8 @@ private fun ProfileScreen(
         GlassCard(theme) {
             ServerStatusCard(theme)
             Divider(color = Color.White.copy(alpha = .08f))
+            SessionManagerCard(theme, api)
+            Divider(color = Color.White.copy(alpha = .08f))
             Row(Modifier.fillMaxWidth().clickable { onLogout() }.padding(vertical = 12.dp),verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Default.Logout,null,tint=Color(0xFFFF8294),modifier=Modifier.size(19.dp))
                 Spacer(Modifier.width(12.dp))
@@ -483,6 +485,42 @@ private fun ProfileScreen(
     }
 }
 
+@Composable
+private fun SessionManagerCard(theme: Palette, api: ApiClient) {
+    var expanded by remember { mutableStateOf(false) }
+    var rows by remember { mutableStateOf<List<Pair<String, Boolean>>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Column {
+        Row(Modifier.fillMaxWidth().clickable {
+            expanded = !expanded
+            if (expanded) {
+                loading = true
+                scope.launch {
+                    runCatching { api.sessions() }.onSuccess { data ->
+                        rows = (0 until data.length()).map { i -> data.getJSONObject(i).let { it.getString("id") to it.optBoolean("current") } }
+                    }
+                    loading = false
+                }
+            }
+        }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Devices, null, tint = theme.accent)
+            Spacer(Modifier.width(12.dp))
+            Text("Активные сеансы", color = Color.White, modifier = Modifier.weight(1f))
+            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = theme.secondary)
+        }
+        if (expanded) {
+            if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = theme.accent)
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (row.second) "Это устройство" else "Другой сеанс", color = theme.secondary, modifier = Modifier.weight(1f), fontSize = 12.sp)
+                    if (!row.second) TextButton(onClick = { scope.launch { runCatching { api.revokeSession(row.first) }; rows = rows.filterNot { it.first == row.first } } }) { Text("Завершить", color = Color(0xFFFF8294)) }
+                }
+            }
+            if (rows.isEmpty() && !loading) Text("Нет активных сеансов", color = theme.secondary, fontSize = 11.sp)
+        }
+    }
+}
 @Composable
 private fun ProfileColorEditor(
     hue: Float,
