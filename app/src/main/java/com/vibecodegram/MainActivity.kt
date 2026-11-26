@@ -767,6 +767,13 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient, current
                                     posts = posts.filterNot { it.id == post.id }
                                 }.onFailure { error = it.message ?: "Не удалось скрыть публикацию" }
                             }
+                        },
+                        onBlock = {
+                            scope.launch {
+                                runCatching { api.blockUser(post.authorId) }.onSuccess {
+                                    posts = posts.filterNot { it.authorId == post.authorId }
+                                }.onFailure { error = it.message ?: "Не удалось заблокировать автора" }
+                            }
                         }
                     )
                 }
@@ -1212,6 +1219,7 @@ private fun ProfileScreen(
     var hiddenLoading by remember { mutableStateOf(true) }
     var hiddenError by remember { mutableStateOf<String?>(null) }
     var profile by remember { mutableStateOf<ApiProfile?>(null) }
+    var blockedUsers by remember { mutableStateOf<List<ApiBlockedUser>>(emptyList()) }
     var editProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
     val savedScope = rememberCoroutineScope()
@@ -1227,6 +1235,7 @@ private fun ProfileScreen(
         runCatching { api.posts("hidden") }
             .onSuccess { hiddenPosts = it }
             .onFailure { hiddenError = it.message ?: "Не удалось загрузить скрытые публикации" }
+        runCatching { api.blockedUsers() }.onSuccess { blockedUsers = it }
         savedLoading = false
         hiddenLoading = false
     }
@@ -1341,6 +1350,13 @@ private fun ProfileScreen(
                             savedPosts = savedPosts.filterNot { it.id == savedPost.id }
                         }.onFailure { savedError = it.message ?: "Не удалось скрыть публикацию" }
                     }
+                },
+                onBlock = {
+                    savedScope.launch {
+                        runCatching { api.blockUser(savedPost.authorId) }.onSuccess {
+                            savedPosts = savedPosts.filterNot { it.authorId == savedPost.authorId }
+                        }.onFailure { savedError = it.message ?: "Не удалось заблокировать автора" }
+                    }
                 }
             )
         }
@@ -1411,6 +1427,43 @@ private fun ProfileScreen(
                 Icon(Icons.Default.Visibility, null, tint = theme.accent, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Вернуть в ленту", color = theme.accent)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        GlassCard(theme) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Block, null, tint = theme.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Заблокированные пользователи", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Их публикации и истории скрыты от тебя", color = theme.secondary, fontSize = 11.sp)
+                    }
+                    IconButton(onClick = {
+                        savedScope.launch {
+                            runCatching { api.blockedUsers() }.onSuccess { blockedUsers = it }
+                        }
+                    }) { Icon(Icons.Default.Refresh, "Обновить", tint = theme.accent) }
+                }
+                if (blockedUsers.isEmpty()) {
+                    Text("Список пуст.", color = theme.secondary, fontSize = 12.sp)
+                } else {
+                    blockedUsers.forEach { blocked ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(blocked.displayName.ifBlank { blocked.username }, color = Color.White, fontSize = 13.sp)
+                                Text("@${blocked.username}", color = theme.secondary, fontSize = 10.sp)
+                            }
+                            TextButton(onClick = {
+                                savedScope.launch {
+                                    runCatching { api.unblockUser(blocked.id) }.onSuccess {
+                                        blockedUsers = blockedUsers.filterNot { it.id == blocked.id }
+                                    }
+                                }
+                            }) { Text("Разблокировать", color = theme.accent, fontSize = 11.sp) }
+                        }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
