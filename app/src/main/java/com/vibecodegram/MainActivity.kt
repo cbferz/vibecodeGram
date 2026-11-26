@@ -609,7 +609,20 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
                     FeedPostCard(post, theme, false, api,
                         onLike = { scope.launch { runCatching { api.toggleLike(post.id) } } },
                         onSave = { scope.launch { runCatching { api.setSaved(post.id, !post.saved) } } },
-                        onHide = { scope.launch { runCatching { api.hidePost(post.id) } } })
+                        onHide = {
+                            scope.launch {
+                                runCatching { api.hidePost(post.id) }.onSuccess {
+                                    posts = posts.filterNot { it.id == post.id }
+                                }
+                            }
+                        },
+                        onBlock = {
+                            scope.launch {
+                                runCatching { api.blockUser(post.authorId) }.onSuccess {
+                                    posts = posts.filterNot { it.authorId == post.authorId }
+                                }
+                            }
+                        })
                 }
             }
         }
@@ -767,6 +780,13 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient, current
                                     posts = posts.filterNot { it.id == post.id }
                                 }.onFailure { error = it.message ?: "Не удалось скрыть публикацию" }
                             }
+                        },
+                        onBlock = {
+                            scope.launch {
+                                runCatching { api.blockUser(post.authorId) }.onSuccess {
+                                    posts = posts.filterNot { it.authorId == post.authorId }
+                                }.onFailure { error = it.message ?: "Не удалось заблокировать автора" }
+                            }
                         }
                     )
                 }
@@ -842,9 +862,13 @@ private fun FeedPostCard(
     api: ApiClient,
     onLike: () -> Unit,
     onSave: () -> Unit,
-    onHide: () -> Unit
+    onHide: () -> Unit,
+    onBlock: (() -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var reportDialog by remember { mutableStateOf(false) }
+    var reportStatus by remember { mutableStateOf<String?>(null) }
+    val reportScope = rememberCoroutineScope()
     GlassCard(theme, compact) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(post.displayName.ifBlank { post.username }.take(1), theme.accent, 44)
@@ -867,6 +891,18 @@ private fun FeedPostCard(
                         leadingIcon = { Icon(Icons.Default.VisibilityOff, null, tint = theme.secondary) },
                         onClick = { menuExpanded = false; onHide() }
                     )
+                    DropdownMenuItem(
+                        text = { Text("Пожаловаться", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Default.Flag, null, tint = theme.secondary) },
+                        onClick = { menuExpanded = false; reportDialog = true }
+                    )
+                    if (onBlock != null) {
+                        DropdownMenuItem(
+                            text = { Text("Заблокировать автора", color = Color.White) },
+                            leadingIcon = { Icon(Icons.Default.Block, null, tint = theme.secondary) },
+                            onClick = { menuExpanded = false; onBlock() }
+                        )
+                    }
                 }
             }
         }
@@ -902,6 +938,43 @@ private fun FeedPostCard(
                 Text(if (post.saved) "Сохранено" else "Сохранить", color = theme.secondary, fontSize = 12.sp)
             }
         }
+        reportStatus?.let { Text(it, color = theme.secondary, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp)) }
+    }
+    if (reportDialog) {
+        AlertDialog(
+            onDismissRequest = { reportDialog = false },
+            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+            containerColor = Color.Transparent,
+            title = { Text("Пожаловаться на публикацию", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Выбери причину:", color = theme.secondary)
+                    listOf(
+                        "Спам" to "spam",
+                        "Оскорбления или травля" to "harassment",
+                        "Насилие" to "violence",
+                        "Дезинформация" to "misinformation",
+                        "Нарушение авторских прав" to "copyright",
+                        "Другое" to "other"
+                    ).forEach { (label, reason) ->
+                        TextButton(
+                            onClick = {
+                                reportDialog = false
+                                reportScope.launch {
+                                    runCatching { api.reportPost(post.id, reason) }
+                                        .onSuccess { reportStatus = "Жалоба отправлена" }
+                                        .onFailure { reportStatus = it.message ?: "Не удалось отправить жалобу" }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(label, color = Color.White) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { reportDialog = false }) { Text("Отмена", color = theme.accent) }
+            }
+        )
     }
 }
 
@@ -1161,6 +1234,7 @@ private fun ProfileScreen(
     var hiddenLoading by remember { mutableStateOf(true) }
     var hiddenError by remember { mutableStateOf<String?>(null) }
     var profile by remember { mutableStateOf<ApiProfile?>(null) }
+    var blockedUsers by remember { mutableStateOf<List<ApiBlockedUser>>(emptyList()) }
     var editProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
     val savedScope = rememberCoroutineScope()
@@ -1176,6 +1250,7 @@ private fun ProfileScreen(
         runCatching { api.posts("hidden") }
             .onSuccess { hiddenPosts = it }
             .onFailure { hiddenError = it.message ?: "Не удалось загрузить скрытые публикации" }
+        runCatching { api.blockedUsers() }.onSuccess { blockedUsers = it }
         savedLoading = false
         hiddenLoading = false
     }
@@ -1290,6 +1365,13 @@ private fun ProfileScreen(
                             savedPosts = savedPosts.filterNot { it.id == savedPost.id }
                         }.onFailure { savedError = it.message ?: "Не удалось скрыть публикацию" }
                     }
+                },
+                onBlock = {
+                    savedScope.launch {
+                        runCatching { api.blockUser(savedPost.authorId) }.onSuccess {
+                            savedPosts = savedPosts.filterNot { it.authorId == savedPost.authorId }
+                        }.onFailure { savedError = it.message ?: "Не удалось заблокировать автора" }
+                    }
                 }
             )
         }
@@ -1360,6 +1442,43 @@ private fun ProfileScreen(
                 Icon(Icons.Default.Visibility, null, tint = theme.accent, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Вернуть в ленту", color = theme.accent)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        GlassCard(theme) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Block, null, tint = theme.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Заблокированные пользователи", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Их публикации и истории скрыты от тебя", color = theme.secondary, fontSize = 11.sp)
+                    }
+                    IconButton(onClick = {
+                        savedScope.launch {
+                            runCatching { api.blockedUsers() }.onSuccess { blockedUsers = it }
+                        }
+                    }) { Icon(Icons.Default.Refresh, "Обновить", tint = theme.accent) }
+                }
+                if (blockedUsers.isEmpty()) {
+                    Text("Список пуст.", color = theme.secondary, fontSize = 12.sp)
+                } else {
+                    blockedUsers.forEach { blocked ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(blocked.displayName.ifBlank { blocked.username }, color = Color.White, fontSize = 13.sp)
+                                Text("@${blocked.username}", color = theme.secondary, fontSize = 10.sp)
+                            }
+                            TextButton(onClick = {
+                                savedScope.launch {
+                                    runCatching { api.unblockUser(blocked.id) }.onSuccess {
+                                        blockedUsers = blockedUsers.filterNot { it.id == blocked.id }
+                                    }
+                                }
+                            }) { Text("Разблокировать", color = theme.accent, fontSize = 11.sp) }
+                        }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
