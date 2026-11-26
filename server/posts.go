@@ -206,7 +206,7 @@ func (a *App) getPostVideo(w http.ResponseWriter, r *http.Request) {
 	var mediaType string
 	var data []byte
 	err := a.db.QueryRowContext(r.Context(),
-		"SELECT v.mime_type,v.data FROM post_videos v JOIN posts p ON p.id=v.post_id WHERE p.id=$1", id,
+		"SELECT v.mime_type,v.data FROM post_videos v JOIN posts p ON p.id=v.post_id WHERE p.id=$1 AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$2))", id, uid(r),
 	).Scan(&mediaType, &data)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "video not found")
