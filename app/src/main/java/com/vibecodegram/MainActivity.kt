@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 val report = buildString {
                     appendLine("vibecodeGram crash report")
-                    appendLine("Time: ${java.time.Instant.now()}")
+                    appendLine("Time: ${java.util.Date()}")
                     appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
                     appendLine("Android API: ${Build.VERSION.SDK_INT}")
                     appendLine("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
