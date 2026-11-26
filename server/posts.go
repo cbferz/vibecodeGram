@@ -29,12 +29,16 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 	if sortMode == "popular" {
 		order = "likes_count DESC, p.created_at DESC, p.id DESC"
 	}
+	whereSaved := ""
+	if sortMode == "saved" {
+		whereSaved = " AND EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)"
+	}
 	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
 		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id),
 		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
 		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)
 		FROM posts p JOIN users u ON u.id=p.author_id
-		WHERE NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
+		WHERE NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)` + whereSaved + `
 		ORDER BY ` + order + ` LIMIT 100`
 	rows, err := a.db.QueryContext(r.Context(), query, uid(r))
 	if err != nil { fail(w, 500, "could not load feed"); return }
