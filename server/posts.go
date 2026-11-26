@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"database/sql"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -12,6 +17,8 @@ func (a *App) registerPostRoutes(r chi.Router) {
 	r.Get("/users/search", a.searchUsers)
 	r.Get("/posts", a.listPosts)
 	r.Post("/posts", a.createPost)
+	r.Post("/posts/video", a.createVideoPost)
+	r.Get("/posts/{id}/video", a.getPostVideo)
 	r.Post("/posts/{id}/like", a.togglePostLike)
 	r.Put("/posts/{id}/save", a.savePost)
 	r.Delete("/posts/{id}/save", a.unsavePost)
@@ -32,17 +39,22 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 	}
 	whereSaved := ""
 	whereHidden := " AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)"
+	whereVideo := ""
 	if sortMode == "saved" {
 		whereSaved = " AND EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)"
 	} else if sortMode == "hidden" {
 		whereHidden = " AND EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)"
+	} else if sortMode == "videos" {
+		whereVideo = " AND v.post_id IS NOT NULL"
 	}
 	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
 		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id),
 		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
-		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1)
+		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
+		v.mime_type,v.byte_size
 		FROM posts p JOIN users u ON u.id=p.author_id
-		WHERE 1=1` + whereHidden + whereSaved + `
+		LEFT JOIN post_videos v ON v.post_id=p.id
+		WHERE 1=1` + whereHidden + whereSaved + whereVideo + `
 		ORDER BY ` + order + ` LIMIT 100`
 	rows, err := a.db.QueryContext(r.Context(), query, uid(r))
 	if err != nil { fail(w, 500, "could not load feed"); return }
@@ -53,10 +65,20 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 		var username, displayName, body, tag string
 		var created interface{}
 		var liked, saved bool
-		if err := rows.Scan(&id,&author,&username,&displayName,&body,&tag,&created,&likes,&liked,&saved); err != nil {
+		var mediaType sql.NullString
+		var mediaSize sql.NullInt64
+		if err := rows.Scan(&id,&author,&username,&displayName,&body,&tag,&created,&likes,&liked,&saved,&mediaType,&mediaSize); err != nil {
 			fail(w, 500, "could not read feed"); return
 		}
-		out = append(out, map[string]any{"id":id,"author_id":author,"username":username,"display_name":displayName,"body":body,"tag":tag,"created_at":created,"likes":likes,"liked":liked,"saved":saved})
+		videoURL := ""
+		if mediaType.Valid {
+			videoURL = "/v1/posts/" + strconv.FormatInt(id, 10) + "/video"
+		}
+		out = append(out, map[string]any{
+			"id":id,"author_id":author,"username":username,"display_name":displayName,
+			"body":body,"tag":tag,"created_at":created,"likes":likes,"liked":liked,"saved":saved,
+			"media_type":mediaType.String,"media_size":mediaSize.Int64,"video_url":videoURL,
+		})
 	}
 	if err := rows.Err(); err != nil { fail(w, 500, "could not read feed"); return }
 	writeJSON(w, 200, out)
@@ -73,6 +95,98 @@ func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
 	err := a.db.QueryRowContext(r.Context(),"INSERT INTO posts(author_id,body,tag) VALUES($1,$2,$3) RETURNING id,created_at",uid(r),in.Body,in.Tag).Scan(&id,&created)
 	if err != nil { fail(w,500,"could not publish post"); return }
 	writeJSON(w,201,map[string]any{"id":id,"author_id":uid(r),"body":in.Body,"tag":in.Tag,"created_at":created,"likes":0,"liked":false,"saved":false})
+}
+
+const maxPostVideoBytes int64 = 50 << 20
+
+func (a *App) createVideoPost(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPostVideoBytes+(2<<20))
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		fail(w, 413, "video upload is too large or invalid")
+		return
+	}
+	body := strings.TrimSpace(r.FormValue("body"))
+	tag := strings.TrimSpace(strings.TrimPrefix(r.FormValue("tag"), "#"))
+	if len(body) > 5000 || len(tag) > 32 {
+		fail(w, 400, "post text must be at most 5000 characters and tag at most 32")
+		return
+	}
+	file, _, err := r.FormFile("video")
+	if err != nil {
+		fail(w, 400, "video file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxPostVideoBytes+1))
+	if err != nil {
+		fail(w, 400, "could not read video")
+		return
+	}
+	if len(data) < 12 || int64(len(data)) > maxPostVideoBytes {
+		fail(w, 413, "video must be a valid MP4 file up to 50 MB")
+		return
+	}
+	// MP4/QuickTime containers carry the ftyp box at bytes 4..8.
+	if string(data[4:8]) != "ftyp" {
+		fail(w, 415, "only MP4 video files are supported")
+		return
+	}
+	if body == "" {
+		body = "Видео"
+	}
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 500, "could not publish video")
+		return
+	}
+	defer tx.Rollback()
+	var id int64
+	var created interface{}
+	if err = tx.QueryRowContext(r.Context(),
+		"INSERT INTO posts(author_id,body,tag) VALUES($1,$2,$3) RETURNING id,created_at",
+		uid(r), body, tag).Scan(&id, &created); err != nil {
+		fail(w, 500, "could not create video post")
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(),
+		"INSERT INTO post_videos(post_id,mime_type,byte_size,data) VALUES($1,'video/mp4',$2,$3)",
+		id, len(data), data); err != nil {
+		fail(w, 500, "could not save video")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		fail(w, 500, "could not publish video")
+		return
+	}
+	writeJSON(w, 201, map[string]any{
+		"id":id,"author_id":uid(r),"body":body,"tag":tag,"created_at":created,
+		"likes":0,"liked":false,"saved":false,"media_type":"video/mp4",
+		"media_size":len(data),"video_url":"/v1/posts/"+strconv.FormatInt(id,10)+"/video",
+	})
+}
+
+func (a *App) getPostVideo(w http.ResponseWriter, r *http.Request) {
+	id, ok := postID(r)
+	if !ok {
+		fail(w, 400, "invalid post id")
+		return
+	}
+	var mediaType string
+	var data []byte
+	err := a.db.QueryRowContext(r.Context(),
+		"SELECT v.mime_type,v.data FROM post_videos v JOIN posts p ON p.id=v.post_id WHERE p.id=$1", id,
+	).Scan(&mediaType, &data)
+	if errors.Is(err, sql.ErrNoRows) {
+		fail(w, 404, "video not found")
+		return
+	}
+	if err != nil {
+		fail(w, 500, "could not load video")
+		return
+	}
+	w.Header().Set("Content-Type", mediaType)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeContent(w, r, "post.mp4", time.Time{}, bytes.NewReader(data))
 }
 
 func (a *App) togglePostLike(w http.ResponseWriter, r *http.Request) {
