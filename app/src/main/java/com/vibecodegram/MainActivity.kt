@@ -22,6 +22,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -148,6 +150,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     val backdrop = rememberLayerBackdrop()
     val destinations = listOf(
         Destination("Лента", Icons.Default.Home, "Твоя лента"),
+        Destination("Reels", Icons.Default.PlayCircle, "Короткие видео"),
         Destination("Чаты", Icons.Default.ChatBubble, "Сообщения"),
         Destination("Профиль", Icons.Default.Person, "Профиль")
     )
@@ -173,10 +176,11 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     .padding(padding)
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
+                    AppHeader(theme, onSearch = { page = 2 }, onSettings = { editor = true })
                     when (page) {
                         0 -> FeedScreen(theme, compact, api)
-                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
+                        1 -> ReelsScreen(theme, api)
+                        2 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
                             currentUser!!, api, onLogout = { appScope.launch { api.logout(); currentUser = null } },
@@ -233,6 +237,120 @@ private fun AppHeader(theme: Palette, onSearch: () -> Unit, onSettings: () -> Un
 private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, action: () -> Unit, theme: Palette) {
     Box(Modifier.size(42.dp).liquidGlass(theme, CircleShape, .78f).clickable { action() }, contentAlignment = Alignment.Center) {
         Icon(icon, description, tint = theme.accent, modifier = Modifier.size(19.dp))
+    }
+}
+
+@Composable
+private fun ReelsScreen(theme: Palette, api: ApiClient) {
+    var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { posts.size })
+
+    LaunchedEffect(api.token, refreshKey) {
+        loading = posts.isEmpty()
+        error = null
+        runCatching { api.posts("videos") }
+            .onSuccess { posts = it.filter { post -> post.videoUrl.isNotBlank() } }
+            .onFailure { error = it.message ?: "Не удалось загрузить видео" }
+        loading = false
+    }
+
+    when {
+        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = theme.accent)
+        }
+        error != null && posts.isEmpty() -> Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.CloudOff, null, tint = theme.secondary, modifier = Modifier.size(42.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(error!!, color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            TextButton(onClick = { refreshKey++ }) { Text("Повторить", color = theme.accent) }
+        }
+        posts.isEmpty() -> Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.VideoLibrary, null, tint = theme.secondary, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("Пока нет коротких видео", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text("Видео из публикаций появятся здесь автоматически.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+            TextButton(onClick = { refreshKey++ }) { Text("Обновить", color = theme.accent) }
+        }
+        else -> Box(Modifier.fillMaxSize().background(Color.Black)) {
+            VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize(), key = { index -> posts[index].id }) { index ->
+                val post = posts[index]
+                val videoUrl = BuildConfig.API_BASE_URL.trimEnd('/') + post.videoUrl
+                var liked by remember(post.id) { mutableStateOf(post.liked) }
+                var saved by remember(post.id) { mutableStateOf(post.saved) }
+                var likes by remember(post.id) { mutableLongStateOf(post.likes) }
+                Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            VideoView(ctx).apply {
+                                setVideoURI(Uri.parse(videoUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
+                                setOnPreparedListener { player -> player.isLooping = true; start() }
+                                setOnErrorListener { _, _, _ -> true }
+                            }
+                        },
+                        update = { view ->
+                            if (index == pagerState.currentPage && !view.isPlaying) view.start()
+                            if (index != pagerState.currentPage && view.isPlaying) view.pause()
+                        }
+                    )
+                    Column(
+                        Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f))))
+                            .padding(start = 20.dp, end = 72.dp, top = 48.dp, bottom = 30.dp)
+                    ) {
+                        Text("@${post.username}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        if (post.body.isNotBlank()) {
+                            Spacer(Modifier.height(7.dp))
+                            Text(post.body, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (post.tag.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text("#${post.tag}", color = theme.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Column(
+                        Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 34.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        IconButton(onClick = {
+                            scope.launch {
+                                runCatching { api.toggleLike(post.id) }.onSuccess { result -> liked = result.first; likes = result.second }
+                            }
+                        }) {
+                            Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Нравится", tint = if (liked) Color(0xFFFF7895) else Color.White, modifier = Modifier.size(27.dp))
+                        }
+                        Text(likes.toString(), color = Color.White, fontSize = 11.sp)
+                        IconButton(onClick = {
+                            scope.launch {
+                                runCatching { api.setSaved(post.id, !saved) }.onSuccess { saved = !saved }
+                            }
+                        }) {
+                            Icon(if (saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, "Сохранить", tint = if (saved) theme.accent else Color.White, modifier = Modifier.size(25.dp))
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Reels", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+                IconButton(onClick = { refreshKey++ }) { Icon(Icons.Default.Refresh, "Обновить Reels", tint = Color.White) }
+            }
+        }
     }
 }
 

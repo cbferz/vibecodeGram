@@ -31,6 +31,10 @@ data class ApiPost(
     val mediaSize: Long = 0L
 )
 data class AuthResult(val token: String, val user: ApiUser)
+data class ApiStory(val id: Long, val authorId: Long, val username: String, val displayName: String, val caption: String, val mediaType: String, val expiresAt: String, val viewed: Boolean, val mediaUrl: String)
+data class ApiProfile(val id: Long, val username: String, val displayName: String, val bio: String, val avatarUrl: String, val coverUrl: String, val website: String, val location: String, val followers: Long, val following: Long, val posts: Long, val followed: Boolean, val isMe: Boolean)
+data class ApiComment(val id: Long, val authorId: Long, val username: String, val displayName: String, val body: String, val createdAt: String)
+data class ApiNotification(val id: Long, val actorId: Long, val username: String, val displayName: String, val kind: String, val read: Boolean, val createdAt: String)
 
 class ApiClient(private val prefs: SharedPreferences) {
     private val base = BuildConfig.API_BASE_URL.trimEnd('/')
@@ -163,4 +167,97 @@ class ApiClient(private val prefs: SharedPreferences) {
         return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { ApiMessage(it.getLong("id"), it.getLong("sender_id"), it.optString("username"), it.optString("body"), it.optString("created_at")) } }.reversed()
     }
     suspend fun sendMessage(id: Long, body: String) { call("POST", "/v1/conversations/$id/messages", JSONObject().put("body", body)) }
+
+    suspend fun stories(): List<ApiStory> {
+        val arr = JSONArray(call("GET", "/v1/stories"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { s ->
+            ApiStory(s.getLong("id"), s.getLong("author_id"), s.optString("username"), s.optString("display_name"),
+                s.optString("caption"), s.optString("media_type"), s.optString("expires_at"), s.optBoolean("viewed"), s.optString("media_url"))
+        } }
+    }
+    suspend fun createStory(uri: Uri, caption: String, durationHours: Int, context: Context) {
+        require(durationHours in listOf(5, 12, 24, 48)) { "Недопустимый срок истории" }
+        withContext(Dispatchers.IO) {
+            val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val boundary = "vibecodegram-${UUID.randomUUID().toString().replace("-", "")}"
+            val connection = (URL("$base/v1/stories").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"; connectTimeout = 15000; readTimeout = 120000; doOutput = true
+                setChunkedStreamingMode(64 * 1024)
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                token?.let { setRequestProperty("Authorization", "Bearer $it") }
+            }
+            try {
+                DataOutputStream(connection.outputStream).use { out ->
+                    fun field(name: String, value: String) {
+                        out.writeBytes("--$boundary\r\n")
+                        out.writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
+                        out.write(value.toByteArray(Charsets.UTF_8)); out.writeBytes("\r\n")
+                    }
+                    field("caption", caption.take(500))
+                    field("duration_hours", durationHours.toString())
+                    out.writeBytes("--$boundary\r\n")
+                    out.writeBytes("Content-Disposition: form-data; name=\"media\"; filename=\"story-upload\"\r\n")
+                    out.writeBytes("Content-Type: $mime\r\n\r\n")
+                    val input = context.contentResolver.openInputStream(uri) ?: throw IllegalStateException("Не удалось открыть файл")
+                    input.use { it.copyTo(out, 64 * 1024) }
+                    out.writeBytes("\r\n--$boundary--\r\n"); out.flush()
+                }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    val message = runCatching { JSONObject(response).optString("error") }.getOrDefault("")
+                    throw IllegalStateException(message.ifBlank { "HTTP $code" })
+                }
+            } finally { connection.disconnect() }
+        }
+    }
+    suspend fun viewStory(id: Long) { call("POST", "/v1/stories/$id/view", JSONObject()) }
+    suspend fun deleteStory(id: Long) { call("DELETE", "/v1/stories/$id") }
+    suspend fun profile(id: Long): ApiProfile {
+        val p = JSONObject(call("GET", "/v1/users/$id"))
+        return ApiProfile(p.getLong("id"),p.optString("username"),p.optString("display_name"),p.optString("bio"),
+            p.optString("avatar_url"),p.optString("cover_url"),p.optString("website"),p.optString("location"),
+            p.optLong("followers"),p.optLong("following"),p.optLong("posts"),p.optBoolean("followed"),p.optBoolean("is_me"))
+    }
+    suspend fun updateProfile(displayName: String, bio: String, avatarUrl: String, coverUrl: String, website: String, location: String) {
+        call("PUT", "/v1/me/profile", JSONObject().put("display_name",displayName).put("bio",bio)
+            .put("avatar_url",avatarUrl).put("cover_url",coverUrl).put("website",website).put("location",location))
+    }
+    suspend fun followUser(id: Long, follow: Boolean) {
+        call(if (follow) "POST" else "DELETE", "/v1/users/$id/follow", if (follow) JSONObject() else null)
+    }
+    suspend fun searchPosts(query: String): List<ApiPost> {
+        val arr = JSONArray(call("GET", "/v1/posts/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
+            ApiPost(p.getLong("id"),p.getLong("author_id"),p.optString("username"),p.optString("display_name"),
+                p.optString("body"),p.optString("tag"),p.optString("created_at"),p.optLong("likes"),p.optBoolean("liked"),
+                p.optBoolean("saved"),p.optString("video_url"),p.optString("media_type"),p.optLong("media_size"))
+        } }
+    }
+    suspend fun recommendations(): List<ApiPost> {
+        val arr = JSONArray(call("GET", "/v1/recommendations"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
+            ApiPost(p.getLong("id"),p.getLong("author_id"),p.optString("username"),p.optString("display_name"),
+                p.optString("body"),p.optString("tag"),p.optString("created_at"),p.optLong("likes"),p.optBoolean("liked"),
+                p.optBoolean("saved"),p.optString("video_url"),p.optString("media_type"),p.optLong("media_size"))
+        } }
+    }
+    suspend fun comments(postId: Long): List<ApiComment> {
+        val arr = JSONArray(call("GET", "/v1/posts/$postId/comments"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { x ->
+            ApiComment(x.getLong("id"),x.getLong("author_id"),x.optString("username"),x.optString("display_name"),x.optString("body"),x.optString("created_at"))
+        } }
+    }
+    suspend fun addComment(postId: Long, body: String) {
+        call("POST", "/v1/posts/$postId/comments", JSONObject().put("body",body))
+    }
+    suspend fun notifications(): List<ApiNotification> {
+        val arr = JSONArray(call("GET", "/v1/notifications"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { x ->
+            ApiNotification(x.getLong("id"),x.getLong("actor_id"),x.optString("username"),x.optString("display_name"),x.optString("kind"),x.optBoolean("read"),x.optString("created_at"))
+        } }
+    }
+    suspend fun markNotificationsRead() { call("POST", "/v1/notifications/read", JSONObject()) }
 }

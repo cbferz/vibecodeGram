@@ -8,6 +8,7 @@ import (
  "embed"
  "encoding/json"
  "errors"
+ "fmt"
  "log"
  "net/http"
  "os"
@@ -43,8 +44,7 @@ func main() {
  db.SetMaxOpenConns(25); db.SetMaxIdleConns(5); db.SetConnMaxLifetime(30*time.Minute)
  ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second); defer cancel()
  for { if err=db.PingContext(ctx); err==nil { break }; if ctx.Err()!=nil { log.Fatal("database unavailable: ",err) }; time.Sleep(time.Second) }
- migrationFiles,err:=migrationFS.ReadDir("migrations"); if err!=nil { log.Fatal(err) }
- for _,file:=range migrationFiles { if file.IsDir() || !strings.HasSuffix(file.Name(),".sql") { continue }; migration,readErr:=migrationFS.ReadFile("migrations/"+file.Name()); if readErr!=nil { log.Fatal(readErr) }; if _,err=db.ExecContext(ctx,string(migration)); err!=nil { log.Fatalf("migration %s: %v",file.Name(),err) } }
+ if err=runMigrations(ctx,db); err!=nil { log.Fatal("database migrations: ",err) }
  a:=&App{db:db,jwtSecret:[]byte(secret)}
  if founderRaw:=strings.TrimSpace(os.Getenv("FOUNDER_USER_ID")); founderRaw!="" { if founderID,parseErr:=strconv.ParseInt(founderRaw,10,64); parseErr==nil && founderID>0 { if _,seedErr:=db.ExecContext(ctx,"INSERT INTO user_badges(user_id,badge_code) SELECT id,'founder' FROM users WHERE id=$1 ON CONFLICT DO NOTHING",founderID); seedErr!=nil { log.Fatal("founder badge bootstrap: ",seedErr) } } }
  r:=chi.NewRouter(); r.Use(middleware.RequestID,middleware.RealIP,middleware.Recoverer,middleware.Timeout(2*time.Minute))
@@ -60,6 +60,51 @@ func main() {
  log.Printf("VibeCodeGram API listening on %s",addr)
  log.Fatal(srv.ListenAndServe())
 }
+func runMigrations(ctx context.Context, db *sql.DB) error {
+    conn,err:=db.Conn(ctx); if err!=nil { return err }; defer conn.Close()
+    const lockID int64 = 73190426011
+    if _,err=conn.ExecContext(ctx,"SELECT pg_advisory_lock($1)",lockID); err!=nil { return err }
+    defer func(){ _,_=conn.ExecContext(context.Background(),"SELECT pg_advisory_unlock($1)",lockID) }()
+    if _,err=conn.ExecContext(ctx,`CREATE TABLE IF NOT EXISTS schema_migrations (
+        version TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`); err!=nil { return err }
+
+    var count int
+    if err=conn.QueryRowContext(ctx,"SELECT COUNT(*) FROM schema_migrations").Scan(&count); err!=nil { return err }
+    if count==0 {
+        var legacy bool
+        err=conn.QueryRowContext(ctx,`SELECT
+            to_regclass('public.users') IS NOT NULL AND
+            to_regclass('public.user_badges') IS NOT NULL AND
+            to_regclass('public.sessions') IS NOT NULL AND
+            to_regclass('public.posts') IS NOT NULL AND
+            to_regclass('public.post_videos') IS NOT NULL`).Scan(&legacy)
+        if err!=nil { return err }
+        if legacy {
+            for _,version:=range []string{"001_init.sql","002_accounts_badges.sql","003_sessions.sql","004_posts.sql","005_post_videos.sql"} {
+                if _,err=conn.ExecContext(ctx,"INSERT INTO schema_migrations(version) VALUES($1) ON CONFLICT DO NOTHING",version); err!=nil { return err }
+            }
+            log.Print("existing database schema detected; baseline migrations 001-005 recorded without modifying user data")
+        }
+    }
+
+    files,err:=migrationFS.ReadDir("migrations"); if err!=nil { return err }
+    for _,file:=range files {
+        if file.IsDir()||!strings.HasSuffix(file.Name(),".sql") { continue }
+        var applied bool
+        if err=conn.QueryRowContext(ctx,"SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)",file.Name()).Scan(&applied); err!=nil { return err }
+        if applied { continue }
+        migration,readErr:=migrationFS.ReadFile("migrations/"+file.Name()); if readErr!=nil { return readErr }
+        tx,txErr:=conn.BeginTx(ctx,nil); if txErr!=nil { return txErr }
+        if _,txErr=tx.ExecContext(ctx,string(migration)); txErr!=nil { _=tx.Rollback(); return fmt.Errorf("%s: %w",file.Name(),txErr) }
+        if _,txErr=tx.ExecContext(ctx,"INSERT INTO schema_migrations(version) VALUES($1)",file.Name()); txErr!=nil { _=tx.Rollback(); return txErr }
+        if txErr=tx.Commit(); txErr!=nil { return txErr }
+        log.Printf("applied migration %s",file.Name())
+    }
+    return nil
+}
+
 func newSessionID() (string,error) { b:=make([]byte,16); if _,err:=rand.Read(b); err!=nil{return "",err}; return hex.EncodeToString(b),nil }
 func (a *App) issueToken(id int64)(string,error){
  now:=time.Now(); sid,err:=newSessionID(); if err!=nil{return "",err}; expires:=now.Add(30*24*time.Hour)
