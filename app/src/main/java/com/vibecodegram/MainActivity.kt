@@ -74,7 +74,7 @@ private fun GlassPopupMenu(
     if (!expanded) return
 
     Popup(
-        alignment = Alignment.TopEnd,
+        alignment = Alignment.Center,
         onDismissRequest = onDismissRequest,
         properties = PopupProperties(
             focusable = true,
@@ -92,7 +92,7 @@ private fun GlassPopupMenu(
         ) {
             Column(
                 modifier = Modifier
-                    .width(224.dp)
+                    .widthIn(max = 224.dp)
                     .liquidGlass(theme, RoundedCornerShape(20.dp), .88f)
                     .padding(7.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -164,6 +164,14 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     var search by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("Все") }
     var openedChat by remember { mutableStateOf<Chat?>(null) }
+    val api = remember { ApiClient(prefs) }
+    var authReady by remember { mutableStateOf(false) }
+    var currentUser by remember { mutableStateOf<ApiUser?>(null) }
+    LaunchedEffect(Unit) {
+        currentUser = if (api.token != null) runCatching { api.me() }.getOrNull() else null
+        if (currentUser == null) api.token = null
+        authReady = true
+    }
     val base = palettes[paletteIndex]
     val theme = base.copy(accent = if (accentIndex >= 0) accents[accentIndex] else base.accent)
     val backdrop = rememberLayerBackdrop()
@@ -176,6 +184,13 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     )
     MaterialTheme(colorScheme = darkColorScheme(primary = theme.accent, background = theme.background, surface = theme.surface, onPrimary = theme.background, onBackground = Color.White, onSurface = Color.White)) {
         CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdrop) {
+        if (!authReady) {
+            Box(Modifier.fillMaxSize().background(theme.background), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = theme.accent)
+            }
+        } else if (currentUser == null) {
+            AuthScreen(theme, api) { currentUser = it }
+        } else {
         Scaffold(
             containerColor = theme.background,
             bottomBar = {
@@ -186,20 +201,20 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
             Box(
                 Modifier.fillMaxSize().layerBackdrop(backdrop)
                     .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background)))
-                    .padding(top = padding.calculateTopPadding(), start = padding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current), end = padding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current))
+                    .padding(padding)
             ) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
-                        0 -> FeedScreen(theme, compact, padding.calculateBottomPadding(), prefs)
-                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = padding.calculateBottomPadding())
-                        2 -> VideosScreen(theme, padding.calculateBottomPadding())
-                        3 -> ExploreScreen(theme, search, { search = it }, padding.calculateBottomPadding())
+                        0 -> FeedScreen(theme, compact, 0.dp, prefs)
+                        1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp)
+                        2 -> VideosScreen(theme, 0.dp)
+                        3 -> ExploreScreen(theme, search, { search = it }, 0.dp)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
                             onCustomize = { editor = true },
                             onProfileColors = { profileEditor = true },
-                            bottomInset = padding.calculateBottomPadding()
+                            bottomInset = 0.dp
                         )
                     }
                 }
@@ -227,6 +242,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
             )
         }
         openedChat?.let { ChatRoomDialog(it, theme, prefs) { openedChat = null } }
+        }
         }
     }
 }
@@ -851,6 +867,50 @@ private fun LiquidGlassNavigationBar(
                 Icon(item.icon, contentDescription = null, tint = theme.secondary, modifier = Modifier.size(21.dp))
                 Text(item.label, color = theme.secondary, fontSize = 9.sp, maxLines = 1)
             }
+        }
+    }
+}
+
+
+@Composable
+private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser) -> Unit) {
+    var register by remember { mutableStateOf(false) }
+    var username by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(theme.glow.copy(alpha=.28f), theme.background, theme.background))).padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(28.dp), .92f).padding(22.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
+            Text("vibecodeGram", color=Color.White, fontSize=29.sp, fontWeight=FontWeight.Black)
+            Text(if(register) "Создай аккаунт" else "С возвращением", color=theme.accent, fontSize=19.sp, fontWeight=FontWeight.Bold)
+            Text("Аккаунт и переписки синхронизируются через сервер.", color=theme.secondary, fontSize=12.sp)
+            if(register) OutlinedTextField(displayName,{displayName=it},modifier=Modifier.fillMaxWidth(),label={Text("Имя")},singleLine=true)
+            OutlinedTextField(username,{username=it.lowercase().filter { c -> c.isLetterOrDigit() || c=='_' }},modifier=Modifier.fillMaxWidth(),label={Text("Логин")},singleLine=true)
+            OutlinedTextField(password,{password=it},modifier=Modifier.fillMaxWidth(),label={Text("Пароль")},singleLine=true,visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())
+            if(error!=null) Text(error!!,color=Color(0xFFFF8294),fontSize=12.sp)
+            Button(onClick={
+                error=null
+                if(username.length !in 3..32 || password.length !in 10..72 || (register && displayName.length>64)) {
+                    error="Логин: 3–32 символа. Пароль: минимум 10 символов."
+                } else {
+                    busy=true
+                    scope.launch {
+                        runCatching { api.authenticate(username,password,displayName,register) }
+                            .onSuccess { onAuthenticated(it.user) }
+                            .onFailure { error=it.message ?: "Не удалось выполнить запрос" }
+                        busy=false
+                    }
+                }
+            },modifier=Modifier.fillMaxWidth(),enabled=!busy) {
+                if(busy) CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp)
+                else Text(if(register) "Зарегистрироваться" else "Войти")
+            }
+            TextButton(onClick={register=!register;error=null},modifier=Modifier.fillMaxWidth()) {
+                Text(if(register) "Уже есть аккаунт? Войти" else "Нет аккаунта? Зарегистрироваться",color=theme.accent)
+            }
+            Text("Пароль хранится на сервере только в виде защищённого хеша.",color=theme.secondary,fontSize=10.sp)
         }
     }
 }
