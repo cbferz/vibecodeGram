@@ -2,7 +2,12 @@ package com.vibecodegram
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.MediaController
+import android.widget.VideoView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -44,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.viewinterop.AndroidView
 import android.os.Build
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -240,6 +246,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
     var composer by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(sort, refreshKey, api.token) {
         loading = posts.isEmpty()
@@ -258,7 +265,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf("Для тебя" to "latest", "Популярное" to "popular").forEach { (label, value) ->
+            listOf("Для тебя" to "latest", "Популярное" to "popular", "Видео" to "videos").forEach { (label, value) ->
                 FilterChip(
                     selected = sort == value,
                     onClick = { if (sort != value) sort = value },
@@ -345,13 +352,61 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
     }
 
     if (composer) {
-        CreatePostDialog(theme = theme, onDismiss = { composer = false }, onPublish = { body, tag ->
+        CreatePostDialog(theme = theme, onDismiss = { composer = false }, onPublish = { body, tag, videoUri ->
             scope.launch {
-                runCatching { api.createPost(body, tag); api.posts(sort) }
+                runCatching { api.createPost(body, tag, videoUri, context); api.posts(sort) }
                     .onSuccess { posts = it; composer = false }
                     .onFailure { error = it.message ?: "Не удалось опубликовать запись" }
             }
         })
+    }
+}
+
+@Composable
+private fun PostVideoPlayer(post: ApiPost, theme: Palette, api: ApiClient) {
+    var playing by remember(post.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val videoUrl = BuildConfig.API_BASE_URL.trimEnd('/') + post.videoUrl
+    if (!playing) {
+        Box(
+            Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF080B11)).clickable { playing = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.PlayCircleFilled, null, tint = theme.accent, modifier = Modifier.size(54.dp))
+                Spacer(Modifier.height(7.dp))
+                Text("Воспроизвести видео", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("MP4 · ${(post.mediaSize / (1024 * 1024)).coerceAtLeast(1)} МБ", color = theme.secondary, fontSize = 10.sp)
+            }
+        }
+    } else {
+        val videoView = remember(post.id) { VideoView(context) }
+        DisposableEffect(videoView) {
+            onDispose { videoView.stopPlayback() }
+        }
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(18.dp)),
+            factory = { ctx ->
+                videoView.apply {
+                    val controller = MediaController(ctx)
+                    controller.setAnchorView(this)
+                    setMediaController(controller)
+                    setVideoURI(
+                        Uri.parse(videoUrl),
+                        mapOf("Authorization" to "Bearer ${api.token.orEmpty()}")
+                    )
+                    setOnPreparedListener { player ->
+                        player.isLooping = false
+                        start()
+                    }
+                    setOnErrorListener { _, _, _ ->
+                        playing = false
+                        true
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -391,7 +446,13 @@ private fun FeedPostCard(
             }
         }
         Spacer(Modifier.height(13.dp))
-        Text(post.body, color = Color(0xFFE8EBF1), fontSize = 15.sp, lineHeight = 23.sp)
+        if (post.body.isNotBlank()) {
+            Text(post.body, color = Color(0xFFE8EBF1), fontSize = 15.sp, lineHeight = 23.sp)
+        }
+        if (post.videoUrl.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            PostVideoPlayer(post, theme, api)
+        }
         if (post.tag.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Surface(
@@ -423,11 +484,15 @@ private fun FeedPostCard(
 private fun CreatePostDialog(
     theme: Palette,
     onDismiss: () -> Unit,
-    onPublish: (String, String) -> Unit
+    onPublish: (String, String, Uri?) -> Unit
 ) {
     var body by remember { mutableStateOf("") }
     var tag by remember { mutableStateOf("") }
+    var selectedVideo by remember { mutableStateOf<Uri?>(null) }
     var busy by remember { mutableStateOf(false) }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        selectedVideo = uri
+    }
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         modifier = Modifier.liquidGlass(theme, RoundedCornerShape(26.dp), .94f),
@@ -451,13 +516,24 @@ private fun CreatePostDialog(
                     placeholder = { Text("Тег, например Дизайн") },
                     singleLine = true
                 )
+                OutlinedButton(
+                    onClick = { videoPicker.launch(arrayOf("video/mp4")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.VideoLibrary, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (selectedVideo == null) "Прикрепить видео MP4" else "Видео прикреплено · заменить")
+                }
+                if (selectedVideo != null) {
+                    Text("Видео выбрано. Ограничение сервера — 50 МБ.", color = theme.accent, fontSize = 11.sp)
+                }
                 Text("${body.length}/5000", color = theme.secondary, fontSize = 10.sp)
             }
         },
         confirmButton = {
             TextButton(
-                enabled = body.isNotBlank() && !busy,
-                onClick = { busy = true; onPublish(body.trim(), tag.trim()) }
+                enabled = (body.isNotBlank() || selectedVideo != null) && !busy,
+                onClick = { busy = true; onPublish(body.trim(), tag.trim(), selectedVideo) }
             ) { Text("Опубликовать", color = theme.accent) }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Отмена", color = theme.secondary) } }
