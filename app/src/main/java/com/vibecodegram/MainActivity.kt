@@ -112,9 +112,8 @@ private fun GlassMenuItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(13.dp))
+            .liquidGlass(theme, RoundedCornerShape(13.dp), .62f)
             .clickable(onClick = onClick)
-            .background(theme.accent.copy(alpha = .045f))
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -176,6 +175,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
         Destination("Профиль", Icons.Default.Person, "Профиль")
     )
     MaterialTheme(colorScheme = darkColorScheme(primary = theme.accent, background = theme.background, surface = theme.surface, onPrimary = theme.background, onBackground = Color.White, onSurface = Color.White)) {
+        CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdrop) {
         Scaffold(
             containerColor = theme.background,
             bottomBar = {
@@ -188,7 +188,6 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                     .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background)))
                     .padding(top = padding.calculateTopPadding(), start = padding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current), end = padding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current))
             ) {
-                CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdrop) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
@@ -203,7 +202,6 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                             bottomInset = padding.calculateBottomPadding()
                         )
                     }
-                }
                 }
             }
         }
@@ -229,6 +227,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
             )
         }
         openedChat?.let { ChatRoomDialog(it, theme, prefs) { openedChat = null } }
+        }
     }
 }
 
@@ -603,7 +602,9 @@ private fun ProfileColorEditor(
     val presets = listOf(205f, 265f, 325f, 350f, 18f, 42f, 125f, 165f)
     AlertDialog(
         onDismissRequest = onClose,
-        containerColor = theme.surface,
+        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(28.dp), .92f),
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
         title = { Text("Цвет профиля", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
@@ -709,7 +710,9 @@ private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 private fun AppearanceEditor(paletteIndex: Int, accentIndex: Int, glass: Float, compact: Boolean, theme: Palette, onPalette: (Int) -> Unit, onAccent: (Int) -> Unit, onGlass: (Float) -> Unit, onCompact: (Boolean) -> Unit, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
-        containerColor = theme.surface,
+        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(28.dp), .92f),
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
         title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Palette, null, tint = theme.accent); Spacer(Modifier.width(9.dp)); Text("Настройка внешнего вида", color = Color.White, fontSize = 19.sp) } },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState())) {
