@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -229,7 +228,7 @@ type postVideoReader struct {
 func (v *postVideoReader) Read(p []byte) (int, error) {
 	if v.offset >= v.size { return 0, io.EOF }
 	if v.offset < v.bufferStart || v.offset >= v.bufferStart+int64(len(v.buffer)) {
-		const chunkSize int64 = 256 * 1024
+		const chunkSize int64 = 1024 * 1024
 		start := (v.offset / chunkSize) * chunkSize
 		length := chunkSize
 		if remaining := v.size - start; remaining < length { length = remaining }
