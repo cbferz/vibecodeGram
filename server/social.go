@@ -49,6 +49,7 @@ func (a *App) listStories(w http.ResponseWriter, r *http.Request) {
         FROM stories s JOIN users u ON u.id=s.author_id
         WHERE s.expires_at>NOW()
           AND (s.author_id=$1 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.followed_id=s.author_id))
+          AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$1))
         ORDER BY s.created_at DESC LIMIT 200`, uid(r))
     if err != nil { fail(w,500,"could not load stories"); return }
     defer rows.Close()
@@ -107,7 +108,8 @@ func (a *App) getStoryMedia(w http.ResponseWriter,r *http.Request) {
     var data []byte
     err:=a.db.QueryRowContext(r.Context(),`SELECT s.media_type,s.data FROM stories s
         WHERE s.id=$1 AND s.expires_at>NOW()
-        AND (s.author_id=$2 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=s.author_id))`,id,uid(r)).Scan(&mime,&data)
+        AND (s.author_id=$2 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=s.author_id))
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$2))`,id,uid(r)).Scan(&mime,&data)
     if errors.Is(err,sql.ErrNoRows) { fail(w,404,"story not found"); return }
     if err!=nil { fail(w,500,"could not load story"); return }
     w.Header().Set("Content-Type",mime)
@@ -121,6 +123,7 @@ func (a *App) viewStory(w http.ResponseWriter,r *http.Request) {
     result,err:=a.db.ExecContext(r.Context(),`INSERT INTO story_views(story_id,viewer_id)
         SELECT id,$2 FROM stories WHERE id=$1 AND expires_at>NOW()
         AND (author_id=$2 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=author_id))
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=author_id) OR (b.blocker_id=author_id AND b.blocked_id=$2))
         ON CONFLICT DO NOTHING`,id,uid(r))
     if err!=nil { fail(w,500,"could not record story view"); return }
     n,_:=result.RowsAffected()
@@ -146,7 +149,7 @@ func (a *App) getUserProfile(w http.ResponseWriter,r *http.Request) {
         (SELECT COUNT(*) FROM follows f WHERE f.follower_id=u.id),
         (SELECT COUNT(*) FROM posts po WHERE po.author_id=u.id),
         EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=u.id)
-        FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1`,id,uid(r)).Scan(&username,&name,&bio,&avatar,&cover,&website,&location,&followers,&following,&posts,&followed)
+        FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1 AND ($1=$2 OR NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$2)))`,id,uid(r)).Scan(&username,&name,&bio,&avatar,&cover,&website,&location,&followers,&following,&posts,&followed)
     if errors.Is(err,sql.ErrNoRows) { fail(w,404,"user not found"); return }
     if err!=nil { fail(w,500,"could not load profile"); return }
     writeJSON(w,200,map[string]any{"id":id,"username":username,"display_name":name,"bio":bio,"avatar_url":avatar,"cover_url":cover,"website":website,"location":location,"followers":followers,"following":following,"posts":posts,"followed":followed,"is_me":id==uid(r)})
@@ -168,7 +171,7 @@ func (a *App) updateMyProfile(w http.ResponseWriter,r *http.Request) {
 func (a *App) followUser(w http.ResponseWriter,r *http.Request) {
     id,ok:=socialID(r); if !ok||id==uid(r) { fail(w,400,"invalid user id"); return }
     res,err:=a.db.ExecContext(r.Context(),`INSERT INTO follows(follower_id,followed_id)
-        SELECT $1,id FROM users WHERE id=$2 ON CONFLICT DO NOTHING`,uid(r),id)
+        SELECT $1,id FROM users WHERE id=$2 AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=id) OR (b.blocker_id=id AND b.blocked_id=$1)) ON CONFLICT DO NOTHING`,uid(r),id)
     if err!=nil { fail(w,500,"could not follow user"); return }
     n,_:=res.RowsAffected()
     if n==0 { var exists bool; _=a.db.QueryRowContext(r.Context(),"SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)",id).Scan(&exists); if !exists { fail(w,404,"user not found"); return } }
@@ -205,6 +208,7 @@ func (a *App) searchPosts(w http.ResponseWriter,r *http.Request) {
         FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN post_videos v ON v.post_id=p.id
         WHERE (p.body ILIKE $2 OR p.tag ILIKE $2 OR u.username ILIKE $2 OR u.display_name ILIKE $2)
         AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))
         ORDER BY p.created_at DESC LIMIT 50`,uid(r),pattern)
     if err!=nil { fail(w,500,"could not search posts"); return }; defer rows.Close()
     out:=make([]map[string]any,0)
@@ -224,6 +228,7 @@ func (a *App) recommendations(w http.ResponseWriter,r *http.Request) {
         COALESCE(v.mime_type,''),COALESCE(v.byte_size,0)
         FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN post_videos v ON v.post_id=p.id
         WHERE p.author_id<>$1 AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))
         ORDER BY
           CASE WHEN EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.followed_id=p.author_id) THEN 1 ELSE 0 END,
           likes DESC,p.created_at DESC LIMIT 50`,uid(r))
