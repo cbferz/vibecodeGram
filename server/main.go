@@ -60,8 +60,18 @@ func main() {
  log.Printf("VibeCodeGram API listening on %s",addr)
  log.Fatal(srv.ListenAndServe())
 }
-func (a *App) issueToken(id int64)(string,error){ now:=time.Now(); c:=Claims{UserID:id,RegisteredClaims:jwt.RegisteredClaims{Issuer:"vibecodegram",Subject:strconv.FormatInt(id,10),IssuedAt:jwt.NewNumericDate(now),ExpiresAt:jwt.NewNumericDate(now.Add(30*24*time.Hour))}}; return jwt.NewWithClaims(jwt.SigningMethodHS256,c).SignedString(a.jwtSecret) }
-func (a *App) parseToken(raw string)(int64,error){ t,e:=jwt.ParseWithClaims(raw,&Claims{},func(t *jwt.Token)(any,error){ if t.Method!=jwt.SigningMethodHS256{return nil,errors.New("unexpected signing method")}; return a.jwtSecret,nil }); if e!=nil{return 0,e}; c,ok:=t.Claims.(*Claims); if !ok||!t.Valid||c.UserID<1{return 0,errors.New("invalid token")}; return c.UserID,nil }
+func newSessionID() (string,error) { b:=make([]byte,16); if _,err:=rand.Read(b); err!=nil{return "",err}; return hex.EncodeToString(b),nil }
+func (a *App) issueToken(id int64)(string,error){
+ now:=time.Now(); sid,err:=newSessionID(); if err!=nil{return "",err}; expires:=now.Add(30*24*time.Hour)
+ if _,err=a.db.Exec("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,$3)",sid,id,expires); err!=nil{return "",err}
+ c:=Claims{UserID:id,SessionID:sid,RegisteredClaims:jwt.RegisteredClaims{ID:sid,Issuer:"vibecodegram",Subject:strconv.FormatInt(id,10),IssuedAt:jwt.NewNumericDate(now),ExpiresAt:jwt.NewNumericDate(expires)}}
+ token,err:=jwt.NewWithClaims(jwt.SigningMethodHS256,c).SignedString(a.jwtSecret); if err!=nil{_,_=a.db.Exec("DELETE FROM sessions WHERE id=$1",sid);return "",err}; return token,nil
+}
+func (a *App) parseClaims(raw string)(*Claims,error){
+ t,e:=jwt.ParseWithClaims(raw,&Claims{},func(t *jwt.Token)(any,error){if t.Method!=jwt.SigningMethodHS256{return nil,errors.New("unexpected signing method")};return a.jwtSecret,nil})
+ if e!=nil{return nil,e}; c,ok:=t.Claims.(*Claims); if !ok||!t.Valid||c.UserID<1||c.SessionID==""||c.ID!=c.SessionID{return nil,errors.New("invalid token")}; return c,nil
+}
+func (a *App) parseToken(raw string)(int64,error){c,e:=a.parseClaims(raw);if e!=nil{return 0,e};return c.UserID,nil}
 func bearer(r *http.Request)string{ h:=strings.SplitN(r.Header.Get("Authorization")," ",2); if len(h)==2&&strings.EqualFold(h[0],"Bearer"){return h[1]}; return "" }
 type sessionContextKey string
 const sessionKey sessionContextKey = "session_id"
