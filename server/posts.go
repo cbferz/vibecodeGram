@@ -35,7 +35,7 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 	sortMode := r.URL.Query().Get("sort")
 	order := "p.created_at DESC, p.id DESC"
 	if sortMode == "popular" {
-		order = "likes_count DESC, p.created_at DESC, p.id DESC"
+		order = "p.likes_count DESC, p.created_at DESC, p.id DESC"
 	}
 	whereSaved := ""
 	whereHidden := " AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)"
@@ -48,7 +48,7 @@ func (a *App) listPosts(w http.ResponseWriter, r *http.Request) {
 		whereVideo = " AND v.post_id IS NOT NULL"
 	}
 	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
-		(SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id) AS likes_count,
+		p.likes_count,
 		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
 		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
 		v.mime_type,v.byte_size
@@ -237,7 +237,7 @@ func (a *App) togglePostLike(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var count int64
-	if err=a.db.QueryRowContext(r.Context(),"SELECT COUNT(*) FROM post_likes WHERE post_id=$1",id).Scan(&count); err!=nil { fail(w,500,"could not update like"); return }
+	if err=a.db.QueryRowContext(r.Context(),"SELECT likes_count FROM posts WHERE id=$1",id).Scan(&count); err!=nil { fail(w,500,"could not update like"); return }
 	writeJSON(w,200,map[string]any{"liked":liked,"likes":count})
 }
 
