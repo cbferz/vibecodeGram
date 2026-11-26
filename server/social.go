@@ -40,8 +40,6 @@ func socialID(r *http.Request) (int64, bool) {
 }
 
 func (a *App) listStories(w http.ResponseWriter, r *http.Request) {
-    // Expired media is removed lazily when the stories feed is requested.
-    if _,err:=a.db.ExecContext(r.Context(),"DELETE FROM stories WHERE expires_at<=NOW()"); err!=nil { fail(w,500,"could not clean expired stories"); return }
     rows, err := a.db.QueryContext(r.Context(), `
         SELECT s.id,s.author_id,u.username,u.display_name,s.caption,s.media_type,s.media_size,
                s.created_at,s.expires_at,
