@@ -166,6 +166,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     var folder by remember { mutableStateOf("Все") }
     var openedChat by remember { mutableStateOf<Chat?>(null) }
     val api = remember { ApiClient(prefs) }
+    val appScope = rememberCoroutineScope()
     var authReady by remember { mutableStateOf(false) }
     var currentUser by remember { mutableStateOf<ApiUser?>(null) }
     LaunchedEffect(Unit) {
@@ -209,7 +210,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
-                            currentUser!!, api, onLogout = { api.token = null; currentUser = null },
+                            currentUser!!, api, onLogout = { appScope.launch { api.logout(); currentUser = null } },
                             onCustomize = { editor = true },
                             onProfileColors = { profileEditor = true },
                             bottomInset = 0.dp
