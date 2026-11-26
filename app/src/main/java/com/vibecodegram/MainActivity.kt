@@ -282,13 +282,15 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
     var chats by remember { mutableStateOf<List<Chat>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(api.token) {
+    var refreshKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(api.token, refreshKey) {
         loading=true; error=null
         runCatching { api.conversations() }
             .onSuccess { rows -> chats=rows.map { Chat(it.title.ifBlank { "Диалог #${it.id}" },it.lastMessage.ifBlank { "Пока нет сообщений" },"",0,false,it.kind=="group",it.id) } }
             .onFailure { error=it.message ?: "Не удалось загрузить чаты" }
         loading=false
     }
+    Column(Modifier.fillMaxSize()) {
     OutlinedTextField(value=search,onValueChange=onSearch,modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp),placeholder={Text("Поиск по чатам")},leadingIcon={Icon(Icons.Default.Search,null)},singleLine=true,shape=RoundedCornerShape(18.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color.White.copy(alpha=.12f),focusedBorderColor=theme.accent,unfocusedTextColor=Color.White,focusedTextColor=Color.White))
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp,vertical=10.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
         listOf("Все","Личные","Группы").forEach { label ->
@@ -297,7 +299,7 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
     }
     when {
         loading -> Box(Modifier.fillMaxWidth().weight(1f),contentAlignment=Alignment.Center){CircularProgressIndicator(color=theme.accent)}
-        error!=null -> Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(error!!,color=theme.secondary,textAlign=androidx.compose.ui.text.style.TextAlign.Center);TextButton(onClick={}){Text("Повтори загрузку",color=theme.accent)}}
+        error!=null -> Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(error!!,color=theme.secondary,textAlign=androidx.compose.ui.text.style.TextAlign.Center);TextButton(onClick={refreshKey++}){Text("Повторить",color=theme.accent)}}
         else -> LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=16.dp,top=4.dp,bottom=12.dp+bottomInset),verticalArrangement=Arrangement.spacedBy(if(compact)5.dp else 9.dp)) {
             val filtered=chats.filter{it.name.contains(search,true)||it.message.contains(search,true)}.filter{folder=="Все"||(folder=="Группы"&&it.group)||(folder=="Личные"&&!it.group)}
             if(filtered.isEmpty()) item { Text("Чатов пока нет. Начни диалог, когда появится поиск пользователей.",color=theme.secondary,modifier=Modifier.fillMaxWidth().padding(28.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
@@ -311,6 +313,7 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
                 }
             }
         }
+    }
     }
 }
 
