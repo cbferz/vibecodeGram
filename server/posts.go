@@ -61,8 +61,14 @@ func (a *App) listMedia(w http.ResponseWriter, r *http.Request, contentKind stri
 		FROM posts p JOIN users u ON u.id=p.author_id
 		LEFT JOIN post_videos v ON v.post_id=p.id
 		WHERE p.content_kind=$2 AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))` + whereHidden + whereSaved + whereVideo + `
-		ORDER BY ` + order + ` LIMIT 100`
-	rows, err := a.db.QueryContext(r.Context(), query, uid(r))
+		ORDER BY ` + order + ` LIMIT $3 OFFSET $4`
+	limit, offset := 100, 0
+	if contentKind == "reel" {
+		limit = 20
+		if n, parseErr := strconv.Atoi(r.URL.Query().Get("limit")); parseErr == nil && n > 0 { limit = n; if limit > 30 { limit = 30 } }
+		if n, parseErr := strconv.Atoi(r.URL.Query().Get("offset")); parseErr == nil && n >= 0 { offset = n }
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, uid(r), contentKind, limit, offset)
 	if err != nil { fail(w, 500, "could not load feed"); return }
 	defer rows.Close()
 	out := make([]map[string]any, 0)
