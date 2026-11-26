@@ -206,7 +206,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                 Column(Modifier.fillMaxSize()) {
                     AppHeader(theme, onSearch = { page = 1 }, onSettings = { editor = true })
                     when (page) {
-                        0 -> FeedScreen(theme, compact, 0.dp, prefs)
+                        0 -> FeedScreen(theme, compact, api)
                         1 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
@@ -267,14 +267,242 @@ private fun HeaderIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, de
 }
 
 @Composable
-private fun FeedScreen(theme: Palette, compact: Boolean, bottomInset: androidx.compose.ui.unit.Dp, prefs: android.content.SharedPreferences) {
-    Box(Modifier.fillMaxSize().padding(20.dp),contentAlignment=Alignment.Center) {
-        Column(horizontalAlignment=Alignment.CenterHorizontally) {
-            Icon(Icons.Default.DynamicFeed,null,tint=theme.secondary,modifier=Modifier.size(44.dp))
-            Spacer(Modifier.height(12.dp))
-            Text("Пока нет публикаций",color=Color.White,fontWeight=FontWeight.SemiBold)
+private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient) {
+    var sort by remember { mutableStateOf("latest") }
+    var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var composer by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(sort, refreshKey, api.token) {
+        loading = posts.isEmpty()
+        refreshing = posts.isNotEmpty()
+        error = null
+        runCatching { api.posts(sort) }
+            .onSuccess { posts = it }
+            .onFailure { error = it.message ?: "Не удалось загрузить ленту" }
+        loading = false
+        refreshing = false
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf("Для тебя" to "latest", "Популярное" to "popular").forEach { (label, value) ->
+                FilterChip(
+                    selected = sort == value,
+                    onClick = { if (sort != value) sort = value },
+                    label = { Text(label, fontWeight = FontWeight.SemiBold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = theme.accent.copy(alpha = .22f),
+                        selectedLabelColor = Color.White,
+                        labelColor = theme.secondary
+                    )
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { refreshKey++ }, enabled = !refreshing) {
+                if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
+                else Icon(Icons.Default.Refresh, "Обновить ленту", tint = theme.secondary)
+            }
+            IconButton(onClick = { composer = true }) {
+                Icon(Icons.Default.AddCircle, "Создать публикацию", tint = theme.accent, modifier = Modifier.size(27.dp))
+            }
+        }
+
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = theme.accent)
+            }
+            error != null && posts.isEmpty() -> Column(
+                Modifier.fillMaxSize().padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.CloudOff, null, tint = theme.secondary, modifier = Modifier.size(38.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(error!!, color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                TextButton(onClick = { refreshKey++ }) { Text("Повторить", color = theme.accent) }
+            }
+            posts.isEmpty() -> Column(
+                Modifier.fillMaxSize().padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.DynamicFeed, null, tint = theme.secondary, modifier = Modifier.size(46.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("Лента пока пуста", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Опубликуй первую запись — она появится здесь.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { composer = true }) { Text("Создать публикацию") }
+            }
+            else -> LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)
+            ) {
+                items(posts, key = { it.id }) { post ->
+                    FeedPostCard(
+                        post = post,
+                        theme = theme,
+                        compact = compact,
+                        onLike = {
+                            scope.launch {
+                                runCatching { api.toggleLike(post.id) }.onSuccess { result ->
+                                    posts = posts.map { if (it.id == post.id) it.copy(liked = result.first, likes = result.second) else it }
+                                }.onFailure { error = it.message ?: "Не удалось поставить отметку" }
+                            }
+                        },
+                        onSave = {
+                            scope.launch {
+                                runCatching { api.setSaved(post.id, !post.saved) }.onSuccess {
+                                    posts = posts.map { if (it.id == post.id) it.copy(saved = !it.saved) else it }
+                                }.onFailure { error = it.message ?: "Не удалось изменить сохранение" }
+                            }
+                        },
+                        onHide = {
+                            scope.launch {
+                                runCatching { api.hidePost(post.id) }.onSuccess {
+                                    posts = posts.filterNot { it.id == post.id }
+                                }.onFailure { error = it.message ?: "Не удалось скрыть публикацию" }
+                            }
+                        }
+                    )
+                }
+                if (error != null) item { Text(error!!, color = Color(0xFFFF8294), fontSize = 11.sp) }
+            }
         }
     }
+
+    if (composer) {
+        CreatePostDialog(theme = theme, onDismiss = { composer = false }, onPublish = { body, tag ->
+            scope.launch {
+                runCatching { api.createPost(body, tag); api.posts(sort) }
+                    .onSuccess { posts = it; composer = false }
+                    .onFailure { error = it.message ?: "Не удалось опубликовать запись" }
+            }
+        })
+    }
+}
+
+@Composable
+private fun FeedPostCard(
+    post: ApiPost,
+    theme: Palette,
+    compact: Boolean,
+    onLike: () -> Unit,
+    onSave: () -> Unit,
+    onHide: () -> Unit
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    GlassCard(theme, compact) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(post.displayName.ifBlank { post.username }.take(1), theme.accent, 44)
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(post.displayName.ifBlank { post.username }, color = Color.White, fontWeight = FontWeight.Bold)
+                Text("@${post.username} · ${post.createdAt.replace("T", " ").take(16)}", color = theme.secondary, fontSize = 11.sp)
+            }
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Default.MoreHoriz, "Действия с публикацией", tint = theme.secondary)
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.background(theme.surface).widthIn(min = 190.dp)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(if (post.saved) "Убрать из сохранённого" else "Сохранить") },
+                        leadingIcon = { Icon(if (post.saved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
+                        onClick = { menuExpanded = false; onSave() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Скрыть публикацию") },
+                        leadingIcon = { Icon(Icons.Default.VisibilityOff, null) },
+                        onClick = { menuExpanded = false; onHide() }
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(13.dp))
+        Text(post.body, color = Color(0xFFE8EBF1), fontSize = 15.sp, lineHeight = 23.sp)
+        if (post.tag.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                color = theme.accent.copy(alpha = .13f),
+                shape = RoundedCornerShape(11.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .12f))
+            ) {
+                Text("#${post.tag}", color = theme.accent, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onLike, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Icon(if (post.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (post.liked) Color(0xFFFF7895) else theme.secondary, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(post.likes.toString(), color = theme.secondary, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onSave, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Icon(if (post.saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, null, tint = theme.secondary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(if (post.saved) "Сохранено" else "Сохранить", color = theme.secondary, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreatePostDialog(
+    theme: Palette,
+    onDismiss: () -> Unit,
+    onPublish: (String, String) -> Unit
+) {
+    var body by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(26.dp), .94f),
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        title = { Text("Новая публикация", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = body,
+                    onValueChange = { if (it.length <= 5000) body = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Чем хочешь поделиться?") },
+                    minLines = 4,
+                    maxLines = 7
+                )
+                OutlinedTextField(
+                    value = tag,
+                    onValueChange = { tag = it.removePrefix("#").take(32) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Тег, например Дизайн") },
+                    singleLine = true
+                )
+                Text("${body.length}/5000", color = theme.secondary, fontSize = 10.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = body.isNotBlank() && !busy,
+                onClick = { busy = true; onPublish(body.trim(), tag.trim()) }
+            ) { Text("Опубликовать", color = theme.accent) }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Отмена", color = theme.secondary) } }
+    )
 }
 
 @Composable
