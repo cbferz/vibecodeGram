@@ -232,7 +232,7 @@ func (a *App) searchPosts(w http.ResponseWriter,r *http.Request) {
         EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
         COALESCE(v.mime_type,''),COALESCE(v.byte_size,0)
         FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN post_videos v ON v.post_id=p.id
-        WHERE (p.body ILIKE $2 OR p.tag ILIKE $2 OR u.username ILIKE $2 OR u.display_name ILIKE $2)
+        WHERE p.content_kind='post' AND (p.body ILIKE $2 OR p.tag ILIKE $2 OR u.username ILIKE $2 OR u.display_name ILIKE $2)
         AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
         AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))
         ORDER BY p.created_at DESC LIMIT 50`,uid(r),pattern)
@@ -253,7 +253,7 @@ func (a *App) recommendations(w http.ResponseWriter,r *http.Request) {
         EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
         COALESCE(v.mime_type,''),COALESCE(v.byte_size,0)
         FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN post_videos v ON v.post_id=p.id
-        WHERE p.author_id<>$1 AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
+        WHERE p.content_kind='post' AND p.author_id<>$1 AND NOT EXISTS(SELECT 1 FROM hidden_posts h WHERE h.post_id=p.id AND h.user_id=$1)
         AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))
         ORDER BY
           CASE WHEN EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.followed_id=p.author_id) THEN 1 ELSE 0 END,
