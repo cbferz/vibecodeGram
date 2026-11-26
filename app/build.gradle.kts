@@ -11,7 +11,7 @@ android {
     compileSdk = 37
     defaultConfig {
         applicationId = "com.vibecodegram"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 35
         versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
         versionName = "0.3.0"
