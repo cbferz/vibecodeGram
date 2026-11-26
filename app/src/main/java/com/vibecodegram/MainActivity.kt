@@ -452,37 +452,122 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var newChat by remember { mutableStateOf(false) }
     LaunchedEffect(api.token, refreshKey) {
-        loading=true; error=null
+        loading = true
+        error = null
         runCatching { api.conversations() }
-            .onSuccess { rows -> chats=rows.map { Chat(it.title.ifBlank { "Диалог #${it.id}" },it.lastMessage.ifBlank { "Пока нет сообщений" },"",0,false,it.kind=="group",it.id) } }
-            .onFailure { error=it.message ?: "Не удалось загрузить чаты" }
-        loading=false
+            .onSuccess { rows -> chats = rows.map { Chat(it.title.ifBlank { "Диалог #${it.id}" }, it.lastMessage.ifBlank { "Пока нет сообщений" }, "", 0, false, it.kind == "group", it.id) } }
+            .onFailure { error = it.message ?: "Не удалось загрузить чаты" }
+        loading = false
     }
     Column(Modifier.fillMaxSize()) {
-    OutlinedTextField(value=search,onValueChange=onSearch,modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp),placeholder={Text("Поиск по чатам")},leadingIcon={Icon(Icons.Default.Search,null)},singleLine=true,shape=RoundedCornerShape(18.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color.White.copy(alpha=.12f),focusedBorderColor=theme.accent,unfocusedTextColor=Color.White,focusedTextColor=Color.White))
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp,vertical=10.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-        listOf("Все","Личные","Группы").forEach { label ->
-            FilterChip(selected=folder==label,onClick={onFolder(label)},label={Text(label)},colors=FilterChipDefaults.filterChipColors(selectedContainerColor=theme.accent.copy(alpha=.20f),selectedLabelColor=theme.accent))
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Сообщения", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = { newChat = true }) { Icon(Icons.Default.Edit, "Новый диалог", tint = theme.accent) }
         }
-    }
-    when {
-        loading -> Box(Modifier.fillMaxWidth().weight(1f),contentAlignment=Alignment.Center){CircularProgressIndicator(color=theme.accent)}
-        error!=null -> Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(error!!,color=theme.secondary,textAlign=androidx.compose.ui.text.style.TextAlign.Center);TextButton(onClick={refreshKey++}){Text("Повторить",color=theme.accent)}}
-        else -> LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=16.dp,top=4.dp,bottom=12.dp+bottomInset),verticalArrangement=Arrangement.spacedBy(if(compact)5.dp else 9.dp)) {
-            val filtered=chats.filter{it.name.contains(search,true)||it.message.contains(search,true)}.filter{folder=="Все"||(folder=="Группы"&&it.group)||(folder=="Личные"&&!it.group)}
-            if(filtered.isEmpty()) item { Text("Чатов пока нет. Начни диалог, когда появится поиск пользователей.",color=theme.secondary,modifier=Modifier.fillMaxWidth().padding(28.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
-            items(filtered,key={it.id}) { chat ->
-                GlassCard(theme,compact,Modifier.clickable{onOpenChat(chat)}) {
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Avatar(chat.name.take(1),theme.accent,48);Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)){Text(chat.name,color=Color.White,fontWeight=FontWeight.SemiBold);Text(chat.message,color=theme.secondary,fontSize=12.sp,maxLines=1,overflow=TextOverflow.Ellipsis)}
-                        Icon(Icons.Default.ChevronRight,null,tint=theme.secondary)
+        OutlinedTextField(
+            value = search, onValueChange = onSearch,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            placeholder = { Text("Поиск по чатам") },
+            leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.White.copy(alpha = .12f), focusedBorderColor = theme.accent, unfocusedTextColor = Color.White, focusedTextColor = Color.White)
+        )
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            listOf("Все", "Личные", "Группы").forEach { label ->
+                FilterChip(selected = folder == label, onClick = { onFolder(label) }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.accent.copy(alpha = .20f), selectedLabelColor = theme.accent))
+            }
+        }
+        when {
+            loading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            error != null -> Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(error!!, color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                TextButton(onClick = { refreshKey++ }) { Text("Повторить", color = theme.accent) }
+            }
+            else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 9.dp)) {
+                val filtered = chats.filter { it.name.contains(search, true) || it.message.contains(search, true) }.filter { folder == "Все" || (folder == "Группы" && it.group) || (folder == "Личные" && !it.group) }
+                if (filtered.isEmpty()) item {
+                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.ChatBubbleOutline, null, tint = theme.secondary, modifier = Modifier.size(36.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text("Диалогов пока нет", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Нажми на кнопку создания и найди пользователя по логину или имени.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+                    }
+                }
+                items(filtered, key = { it.id }) { chat ->
+                    GlassCard(theme, compact, Modifier.clickable { onOpenChat(chat) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(chat.name.take(1), theme.accent, 48); Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) { Text(chat.name, color = Color.White, fontWeight = FontWeight.SemiBold); Text(chat.message, color = theme.secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            Icon(Icons.Default.ChevronRight, null, tint = theme.secondary)
+                        }
                     }
                 }
             }
         }
     }
+    if (newChat) NewChatDialog(theme, api, onDismiss = { newChat = false }, onCreated = { chat ->
+        newChat = false
+        refreshKey++
+        onOpenChat(chat)
+    })
+}
+
+@Composable
+private fun NewChatDialog(theme: Palette, api: ApiClient, onDismiss: () -> Unit, onCreated: (Chat) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var users by remember { mutableStateOf<List<ApiUser>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var busyUser by remember { mutableStateOf<Long?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(query) {
+        if (query.trim().length < 2) { users = emptyList(); loading = false; return@LaunchedEffect }
+        loading = true
+        error = null
+        kotlinx.coroutines.delay(250)
+        runCatching { api.searchUsers(query.trim()) }
+            .onSuccess { users = it }
+            .onFailure { error = it.message ?: "Не удалось найти пользователей" }
+        loading = false
+    }
+    Dialog(onDismissRequest = { if (busyUser == null) onDismiss() }) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.78f).liquidGlass(theme, RoundedCornerShape(24.dp), .94f), color = Color.Transparent, shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Новый диалог", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, enabled = busyUser == null) { Icon(Icons.Default.Close, "Закрыть", tint = theme.secondary) }
+                }
+                OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Имя или логин (от 2 символов)") }, leadingIcon = { Icon(Icons.Default.Search, null) })
+                Spacer(Modifier.height(8.dp))
+                if (loading) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+                else if (error != null) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xFFFF8294), textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                else if (query.trim().length < 2) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Введи минимум 2 символа для поиска.", color = theme.secondary) }
+                else if (users.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Пользователи не найдены.", color = theme.secondary) }
+                else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(users, key = { it.id }) { user ->
+                        GlassCard(theme, modifier = Modifier.clickable(enabled = busyUser == null) {
+                            busyUser = user.id
+                            scope.launch {
+                                runCatching { api.createDirectConversation(user.id) }
+                                    .onSuccess { id -> onCreated(Chat(user.displayName.ifBlank { user.username }, "@${user.username}", "", 0, false, false, id)) }
+                                    .onFailure { error = it.message ?: "Не удалось создать диалог" }
+                                busyUser = null
+                            }
+                        }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Avatar(user.displayName.ifBlank { user.username }.take(1), theme.accent, 42)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) { Text(user.displayName.ifBlank { user.username }, color = Color.White, fontWeight = FontWeight.SemiBold); Text("@${user.username}", color = theme.secondary, fontSize = 11.sp) }
+                                if (busyUser == user.id) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
+                                else Icon(Icons.Default.Chat, null, tint = theme.accent)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
