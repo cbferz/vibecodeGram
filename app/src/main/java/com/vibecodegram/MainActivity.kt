@@ -575,9 +575,37 @@ private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> U
                         Text("Исчезнет через $duration ч")
                         Icon(Icons.Default.ExpandMore, null)
                     }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(20.dp), .98f).width(224.dp),
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp
+                    ) {
                         listOf(5, 12, 24, 48).forEach { hours ->
-                            DropdownMenuItem(text = { Text("$hours часов") }, onClick = { duration = hours; expanded = false })
+                            val selected = duration == hours
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            when (hours) {
+                                                5 -> "5 часов"
+                                                12 -> "12 часов"
+                                                24 -> "24 часа"
+                                                else -> "48 часов"
+                                            },
+                                            color = if (selected) theme.accent else Color.White,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (selected) Icon(Icons.Default.Check, contentDescription = "Выбрано", tint = theme.accent, modifier = Modifier.size(18.dp))
+                                    }
+                                },
+                                onClick = { duration = hours; expanded = false },
+                                modifier = Modifier.padding(horizontal = 6.dp).clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) Color.White.copy(alpha = .12f) else Color.Transparent)
+                            )
                         }
                     }
                 }
