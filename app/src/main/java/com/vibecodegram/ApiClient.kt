@@ -33,7 +33,7 @@ data class ApiPost(
 )
 data class AuthResult(val token: String, val user: ApiUser)
 data class ApiStory(val id: Long, val authorId: Long, val username: String, val displayName: String, val caption: String, val mediaType: String, val expiresAt: String, val viewed: Boolean, val mediaUrl: String)
-data class ApiProfile(val id: Long, val username: String, val displayName: String, val bio: String, val avatarUrl: String, val coverUrl: String, val website: String, val location: String, val followers: Long, val following: Long, val posts: Long, val followed: Boolean, val isMe: Boolean)
+data class ApiProfile(val id: Long, val username: String, val displayName: String, val bio: String, val avatarUrl: String, val coverUrl: String, val website: String, val location: String, val followers: Long, val following: Long, val posts: Long, val likes: Long, val followed: Boolean, val isMe: Boolean)
 data class ApiComment(val id: Long, val authorId: Long, val username: String, val displayName: String, val body: String, val createdAt: String)
 data class ApiNotification(val id: Long, val actorId: Long, val username: String, val displayName: String, val kind: String, val read: Boolean, val createdAt: String)
 data class ApiBlockedUser(val id: Long, val username: String, val displayName: String, val blockedAt: String)
@@ -234,7 +234,17 @@ class ApiClient(private val prefs: SharedPreferences) {
         val p = JSONObject(call("GET", "/v1/users/$id"))
         return ApiProfile(p.getLong("id"),p.optString("username"),p.optString("display_name"),p.optString("bio"),
             p.optString("avatar_url"),p.optString("cover_url"),p.optString("website"),p.optString("location"),
-            p.optLong("followers"),p.optLong("following"),p.optLong("posts"),p.optBoolean("followed"),p.optBoolean("is_me"))
+            p.optLong("followers"),p.optLong("following"),p.optLong("posts"),p.optLong("likes"),p.optBoolean("followed"),p.optBoolean("is_me"))
+    }
+    suspend fun userPosts(id: Long, kind: String): List<ApiPost> {
+        require(kind in setOf("posts", "videos", "vibees"))
+        val arr = JSONArray(call("GET", "/v1/users/$id/posts?kind=$kind"))
+        return (0 until arr.length()).map { i -> arr.getJSONObject(i).let { p ->
+            ApiPost(p.getLong("id"),p.getLong("author_id"),p.optString("username"),p.optString("display_name"),
+                p.optString("body"),p.optString("tag"),p.optString("created_at"),p.optLong("likes"),
+                p.optBoolean("liked"),p.optBoolean("saved"),p.optString("video_url"),
+                p.optString("media_type"),p.optLong("media_size"),p.optString("content_kind","post"))
+        } }
     }
     suspend fun updateProfile(displayName: String, bio: String, avatarUrl: String, coverUrl: String, website: String, location: String) {
         call("PUT", "/v1/me/profile", JSONObject().put("display_name",displayName).put("bio",bio)
