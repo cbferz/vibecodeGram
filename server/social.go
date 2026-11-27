@@ -22,6 +22,7 @@ func (a *App) registerSocialRoutes(r chi.Router) {
     r.Post("/stories/{id}/view", a.viewStory)
     r.Delete("/stories/{id}", a.deleteStory)
     r.Get("/users/{id}", a.getUserProfile)
+	r.Get("/users/{id}/posts", a.listUserPosts)
     r.Put("/me/profile", a.updateMyProfile)
     r.Post("/users/{id}/follow", a.followUser)
     r.Delete("/users/{id}/follow", a.unfollowUser)
@@ -212,17 +213,18 @@ func (a *App) deleteStory(w http.ResponseWriter,r *http.Request) {
 func (a *App) getUserProfile(w http.ResponseWriter,r *http.Request) {
     id,ok:=socialID(r); if !ok { fail(w,400,"invalid user id"); return }
     var username,name,bio,avatar,cover,website,location string
-    var followers,following,posts int64
+    var followers,following,posts,likes int64
     var followed bool
     err:=a.db.QueryRowContext(r.Context(),`SELECT u.username,u.display_name,COALESCE(p.bio,''),COALESCE(p.avatar_url,''),COALESCE(p.cover_url,''),COALESCE(p.website,''),COALESCE(p.location,''),
         (SELECT COUNT(*) FROM follows f WHERE f.followed_id=u.id),
         (SELECT COUNT(*) FROM follows f WHERE f.follower_id=u.id),
         (SELECT COUNT(*) FROM posts po WHERE po.author_id=u.id),
+        (SELECT COALESCE(SUM(po.likes_count),0) FROM posts po WHERE po.author_id=u.id),
         EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=u.id)
-        FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1 AND ($1=$2 OR NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$2)))`,id,uid(r)).Scan(&username,&name,&bio,&avatar,&cover,&website,&location,&followers,&following,&posts,&followed)
+        FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1 AND ($1=$2 OR NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$2)))`,id,uid(r)).Scan(&username,&name,&bio,&avatar,&cover,&website,&location,&followers,&following,&posts,&likes,&followed)
     if errors.Is(err,sql.ErrNoRows) { fail(w,404,"user not found"); return }
     if err!=nil { fail(w,500,"could not load profile"); return }
-    writeJSON(w,200,map[string]any{"id":id,"username":username,"display_name":name,"bio":bio,"avatar_url":avatar,"cover_url":cover,"website":website,"location":location,"followers":followers,"following":following,"posts":posts,"followed":followed,"is_me":id==uid(r)})
+    writeJSON(w,200,map[string]any{"id":id,"username":username,"display_name":name,"bio":bio,"avatar_url":avatar,"cover_url":cover,"website":website,"location":location,"followers":followers,"following":following,"posts":posts,"likes":likes,"followed":followed,"is_me":id==uid(r)})
 }
 
 func (a *App) updateMyProfile(w http.ResponseWriter,r *http.Request) {

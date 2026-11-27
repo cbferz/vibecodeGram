@@ -35,6 +35,54 @@ func postID(r *http.Request) (int64, bool) {
 
 func (a *App) listPosts(w http.ResponseWriter, r *http.Request) { a.listMedia(w, r, "post") }
 
+func (a *App) listUserPosts(w http.ResponseWriter, r *http.Request) {
+	userID, ok := socialID(r)
+	if !ok { fail(w, 400, "invalid user id"); return }
+	kind := r.URL.Query().Get("kind")
+	if kind == "" { kind = "posts" }
+	if kind != "posts" && kind != "videos" && kind != "vibees" { fail(w, 400, "invalid profile media kind"); return }
+	contentKind := "post"
+	videoOnly := ""
+	if kind == "vibees" { contentKind = "reel" }
+	if kind == "videos" { videoOnly = " AND v.post_id IS NOT NULL" }
+	query := `SELECT p.id,p.author_id,u.username,u.display_name,p.body,p.tag,p.created_at,
+		p.likes_count,
+		EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=$1),
+		EXISTS(SELECT 1 FROM saved_posts s WHERE s.post_id=p.id AND s.user_id=$1),
+		v.mime_type,v.byte_size,p.content_kind
+		FROM posts p JOIN users u ON u.id=p.author_id
+		LEFT JOIN post_videos v ON v.post_id=p.id
+		WHERE p.author_id=$2 AND p.content_kind=$3
+		AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$1 AND b.blocked_id=p.author_id) OR (b.blocker_id=p.author_id AND b.blocked_id=$1))` + videoOnly + `
+		ORDER BY p.created_at DESC,p.id DESC LIMIT 100`
+	rows, err := a.db.QueryContext(r.Context(), query, uid(r), userID, contentKind)
+	if err != nil { fail(w, 500, "could not load profile media"); return }
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, author, likes int64
+		var username, displayName, body, tag string
+		var created interface{}
+		var liked, saved bool
+		var mediaType sql.NullString
+		var mediaSize sql.NullInt64
+		var rowKind string
+		if err := rows.Scan(&id,&author,&username,&displayName,&body,&tag,&created,&likes,&liked,&saved,&mediaType,&mediaSize,&rowKind); err != nil {
+			fail(w, 500, "could not read profile media"); return
+		}
+		videoURL := ""
+		if mediaType.Valid { videoURL = "/v1/posts/" + strconv.FormatInt(id, 10) + "/video" }
+		out = append(out, map[string]any{
+			"id":id,"author_id":author,"username":username,"display_name":displayName,
+			"body":body,"tag":tag,"created_at":created,"likes":likes,"liked":liked,"saved":saved,
+			"media_type":mediaType.String,"media_size":mediaSize.Int64,"video_url":videoURL,"content_kind":rowKind,
+		})
+	}
+	if err := rows.Err(); err != nil { fail(w, 500, "could not read profile media"); return }
+	writeJSON(w, 200, out)
+}
+
+
 func (a *App) listReels(w http.ResponseWriter, r *http.Request) { a.listMedia(w, r, "reel") }
 
 func (a *App) listMedia(w http.ResponseWriter, r *http.Request, contentKind string) {
