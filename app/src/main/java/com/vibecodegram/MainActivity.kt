@@ -187,6 +187,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     var search by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("Все") }
     var openedChat by remember { mutableStateOf<Chat?>(null) }
+    var selectedProfile by remember { mutableStateOf<ApiUser?>(null) }
     val api = remember { ApiClient(prefs) }
     val appScope = rememberCoroutineScope()
     var authReady by remember { mutableStateOf(false) }
@@ -201,7 +202,7 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     val backdrop = rememberLayerBackdrop()
     val destinations = listOf(
         Destination("Лента", Icons.Default.Home, "Твоя лента"),
-        Destination("Reels", Icons.Default.PlayCircle, "Короткие видео"),
+        Destination("vibees", Icons.Default.PlayCircle, "Короткие видео"),
         Destination("Чаты", Icons.Default.ChatBubble, "Сообщения"),
         Destination("Профиль", Icons.Default.Person, "Профиль")
     )
@@ -232,7 +233,9 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                         0 -> FeedScreen(theme, compact, api, currentUser!!.id)
                         1 -> ReelsScreen(theme, api)
                         2 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
-                        4 -> SearchScreen(theme, api, onOpenChat = { openedChat = it })
+                        4 -> if (selectedProfile != null) {
+                            PublicProfileScreen(theme, api, selectedProfile!!, onBack = { selectedProfile = null })
+                        } else SearchScreen(theme, api, onOpenChat = { openedChat = it }, onOpenProfile = { selectedProfile = it })
                         5 -> NotificationsScreen(theme, api)
                         else -> ProfileScreen(
                             theme, paletteIndex, profileHue, profileSaturation, profileBrightness, profileGradient,
@@ -801,7 +804,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
     }
 }
 @Composable
-private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> Unit) {
+private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> Unit, onOpenProfile: (ApiUser) -> Unit) {
     var query by remember { mutableStateOf("") }
     var users by remember { mutableStateOf<List<ApiUser>>(emptyList()) }
     var posts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
@@ -840,13 +843,7 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Avatar(user.displayName.ifBlank { user.username }.take(1), theme.accent, 42)
                             Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f).clickable {
-                                scope.launch {
-                                    runCatching { api.createDirectConversation(user.id) }.onSuccess { id ->
-                                        onOpenChat(Chat(user.displayName.ifBlank { user.username }, "@${user.username}", "", 0, false, false, id))
-                                    }
-                                }
-                            }) {
+                            Column(Modifier.weight(1f).clickable { onOpenProfile(user) }) {
                                 Text(user.displayName.ifBlank { user.username }, color = Color.White, fontWeight = FontWeight.SemiBold)
                                 Text("@${user.username}", color = theme.secondary, fontSize = 11.sp)
                             }
@@ -876,6 +873,97 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
                             }
                         })
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PublicProfileScreen(theme: Palette, api: ApiClient, user: ApiUser, onBack: () -> Unit) {
+    var profile by remember(user.id) { mutableStateOf<ApiProfile?>(null) }
+    var selectedTab by remember(user.id) { mutableIntStateOf(0) }
+    var following by remember(user.id) { mutableStateOf(false) }
+    var loading by remember(user.id) { mutableStateOf(true) }
+    var mediaLoading by remember(user.id) { mutableStateOf(true) }
+    var posts by remember(user.id) { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var videos by remember(user.id) { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var vibees by remember(user.id) { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var error by remember(user.id) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(user.id, api.token) {
+        loading = true
+        runCatching { api.profile(user.id) }.onSuccess { profile = it; following = it.followed }.onFailure { error = it.message }
+        loading = false
+        mediaLoading = true
+        runCatching { api.userPosts(user.id, "posts") }.onSuccess { posts = it }
+        runCatching { api.userPosts(user.id, "videos") }.onSuccess { videos = it }
+        runCatching { api.userPosts(user.id, "vibees") }.onSuccess { vibees = it }
+        mediaLoading = false
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад", tint = Color.White) }
+            Text("Профиль", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        GlassCard(theme) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar(user.displayName.ifBlank { user.username }.take(1), theme.accent, 76)
+                Spacer(Modifier.height(10.dp))
+                Text(user.displayName.ifBlank { user.username }, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text("@${user.username}", color = theme.secondary, fontSize = 12.sp)
+                if (loading) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), color = theme.accent)
+                profile?.let { data ->
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        ProfileStat(data.posts.toString(), "публикаций", theme)
+                        ProfileStat(data.followers.toString(), "подписчиков", theme)
+                        ProfileStat(data.following.toString(), "подписок", theme)
+                        ProfileStat(data.likes.toString(), "лайков", theme)
+                    }
+                    if (data.bio.isNotBlank()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(data.bio, color = Color.White.copy(alpha = .9f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                    if (data.location.isNotBlank()) Text(data.location, color = theme.secondary, fontSize = 11.sp)
+                    if (data.website.isNotBlank()) Text(data.website, color = theme.accent, fontSize = 11.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { scope.launch {
+                            runCatching { api.followUser(user.id, !following) }.onSuccess { following = !following; profile = profile?.copy(followed = following, followers = (profile?.followers ?: 0) + if (following) 1 else -1) }
+                                .onFailure { error = it.message }
+                        } },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.accent),
+                        shape = RoundedCornerShape(16.dp)
+                    ) { Text(if (following) "Вы подписаны" else "Подписаться") }
+                }
+                error?.let { Text(it, color = Color(0xFFFF8294), fontSize = 11.sp) }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(18.dp), .95f).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            listOf("Посты", "Видео", "vibees").forEachIndexed { index, label ->
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                    .background(if (selectedTab == index) Color.White.copy(alpha = .16f) else Color.Transparent)
+                    .clickable { selectedTab = index }.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                    Text(label, color = if (selectedTab == index) Color.White else theme.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        val items = when (selectedTab) { 1 -> videos; 2 -> vibees; else -> posts }
+        when {
+            mediaLoading -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            items.isEmpty() -> GlassCard(theme) { Text(if (selectedTab == 2) "vibees пока нет" else if (selectedTab == 1) "Видео пока нет" else "Публикаций пока нет", color = theme.secondary, modifier = Modifier.padding(18.dp)) }
+            else -> items.forEach { post ->
+                FeedPostCard(post, theme, false, api,
+                    onLike = { scope.launch { runCatching { api.toggleLike(post.id) }.onSuccess { pair ->
+                        fun patch(list: List<ApiPost>) = list.map { if (it.id == post.id) it.copy(liked = pair.first, likes = pair.second) else it }
+                        posts = patch(posts); videos = patch(videos); vibees = patch(vibees)
+                    } } },
+                    onSave = { scope.launch { runCatching { api.setSaved(post.id, !post.saved) } } },
+                    onHide = { scope.launch { runCatching { api.hidePost(post.id) }.onSuccess {
+                        posts = posts.filterNot { it.id == post.id }; videos = videos.filterNot { it.id == post.id }; vibees = vibees.filterNot { it.id == post.id }
+                    } } }
+                )
             }
         }
     }
