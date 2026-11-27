@@ -728,7 +728,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
                         .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .64f), Color.Black.copy(alpha = .12f), Color.Transparent)))
                         .padding(start = 14.dp, top = 16.dp, end = 116.dp, bottom = 22.dp)
                 ) {
-                    Text("@\${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("@${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
                     if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
                 }
 
@@ -1487,12 +1487,22 @@ private fun ProfileScreen(
     var hiddenLoading by remember { mutableStateOf(true) }
     var hiddenError by remember { mutableStateOf<String?>(null) }
     var profile by remember { mutableStateOf<ApiProfile?>(null) }
+    var profileTab by remember { mutableIntStateOf(0) }
+    var profilePosts by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var profileVideos by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var profileVibees by remember { mutableStateOf<List<ApiPost>>(emptyList()) }
+    var profileMediaLoading by remember { mutableStateOf(true) }
     var blockedUsers by remember { mutableStateOf<List<ApiBlockedUser>>(emptyList()) }
     var editProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
     val savedScope = rememberCoroutineScope()
     LaunchedEffect(api.token, user.id) {
         runCatching { api.profile(user.id) }.onSuccess { profile = it }
+        profileMediaLoading = true
+        runCatching { api.userPosts(user.id, "posts") }.onSuccess { profilePosts = it }
+        runCatching { api.userPosts(user.id, "videos") }.onSuccess { profileVideos = it }
+        runCatching { api.userPosts(user.id, "vibees") }.onSuccess { profileVibees = it }
+        profileMediaLoading = false
         savedLoading = true
         hiddenLoading = true
         savedError = null
@@ -1536,6 +1546,13 @@ private fun ProfileScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(data.followers.toString(), color = Color.White, fontWeight = FontWeight.Bold); Text("подписчиков", color = theme.secondary, fontSize = 10.sp) }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(data.following.toString(), color = Color.White, fontWeight = FontWeight.Bold); Text("подписок", color = theme.secondary, fontSize = 10.sp) }
                 }
+                Spacer(Modifier.height(7.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(data.likes.toString(), color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("лайков", color = theme.secondary, fontSize = 10.sp)
+                    }
+                }
                 if (data.bio.isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     Text(data.bio, color = Color(0xFFE8EBF1), fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -1560,6 +1577,53 @@ private fun ProfileScreen(
                 Icon(Icons.Default.ColorLens, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Цвет профиля")
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(18.dp), .95f).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            listOf("Посты", "Видео", "vibees").forEachIndexed { index, label ->
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                        .background(if (profileTab == index) Color.White.copy(alpha = .16f) else Color.Transparent)
+                        .clickable { profileTab = index }.padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(label, color = if (profileTab == index) Color.White else theme.secondary, fontWeight = if (profileTab == index) FontWeight.Bold else FontWeight.Medium, fontSize = 12.sp)
+                }
+            }
+        }
+        val visibleMedia = when (profileTab) { 1 -> profileVideos; 2 -> profileVibees; else -> profilePosts }
+        when {
+            profileMediaLoading -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+            visibleMedia.isEmpty() -> GlassCard(theme) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(if (profileTab == 2) Icons.Default.PlayCircle else Icons.Default.Collections, null, tint = theme.secondary, modifier = Modifier.size(32.dp))
+                    Text(if (profileTab == 2) "vibees пока нет" else if (profileTab == 1) "Видео пока нет" else "Публикаций пока нет", color = theme.secondary, fontSize = 12.sp)
+                }
+            }
+            else -> visibleMedia.forEach { media ->
+                FeedPostCard(
+                    post = media, theme = theme, compact = false, api = api,
+                    onLike = {
+                        savedScope.launch {
+                            runCatching { api.toggleLike(media.id) }.onSuccess { result ->
+                                fun update(items: List<ApiPost>) = items.map { if (it.id == media.id) it.copy(liked = result.first, likes = result.second) else it }
+                                profilePosts = update(profilePosts); profileVideos = update(profileVideos); profileVibees = update(profileVibees)
+                            }
+                        }
+                    },
+                    onSave = {
+                        savedScope.launch {
+                            runCatching { api.setSaved(media.id, !media.saved) }.onSuccess {
+                                fun update(items: List<ApiPost>) = items.map { if (it.id == media.id) it.copy(saved = !it.saved) else it }
+                                profilePosts = update(profilePosts); profileVideos = update(profileVideos); profileVibees = update(profileVibees)
+                            }
+                        }
+                    },
+                    onHide = { savedScope.launch { runCatching { api.hidePost(media.id) }.onSuccess {
+                        profilePosts = profilePosts.filterNot { it.id == media.id }; profileVideos = profileVideos.filterNot { it.id == media.id }; profileVibees = profileVibees.filterNot { it.id == media.id }
+                    } } }
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
