@@ -120,13 +120,13 @@ func (v *storyMediaReader) Read(p []byte) (int, error) {
         length := chunkSize
         if remaining := v.size - start; remaining < length { length = remaining }
         var chunk []byte
-        err := v.db.QueryRowContext(v.ctx, \`SELECT substring(s.data from $2::integer for $3::integer)
+        err := v.db.QueryRowContext(v.ctx, `SELECT substring(s.data from $2::integer for $3::integer)
             FROM stories s
             WHERE s.id=$1 AND s.expires_at>NOW()
               AND (s.author_id=$4 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$4 AND f.followed_id=s.author_id))
               AND NOT EXISTS(SELECT 1 FROM user_blocks b
                 WHERE (b.blocker_id=$4 AND b.blocked_id=s.author_id)
-                   OR (b.blocker_id=s.author_id AND b.blocked_id=$4))\`,
+                   OR (b.blocker_id=s.author_id AND b.blocked_id=$4))`,
             v.storyID, start+1, length, v.userID).Scan(&chunk)
         if err != nil { return 0, err }
         if len(chunk) == 0 { return 0, io.EOF }
@@ -158,10 +158,10 @@ func (a *App) getStoryMedia(w http.ResponseWriter,r *http.Request) {
     id,ok:=socialID(r); if !ok { fail(w,400,"invalid story id"); return }
     var mime string
     var size int64
-    err:=a.db.QueryRowContext(r.Context(),\`SELECT s.media_type,s.media_size FROM stories s
+    err:=a.db.QueryRowContext(r.Context(),`SELECT s.media_type,s.media_size FROM stories s
         WHERE s.id=$1 AND s.expires_at>NOW()
         AND (s.author_id=$2 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=s.author_id))
-        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$2))\`,id,uid(r)).Scan(&mime,&size)
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$2))`,id,uid(r)).Scan(&mime,&size)
     if errors.Is(err,sql.ErrNoRows) { fail(w,404,"story not found"); return }
     if err!=nil { fail(w,500,"could not load story"); return }
     if size < 0 { fail(w,500,"invalid story media size"); return }
