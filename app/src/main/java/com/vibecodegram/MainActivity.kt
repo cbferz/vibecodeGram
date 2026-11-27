@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.VideoView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -599,13 +600,27 @@ private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> U
 @Composable
 private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, currentUserId: Long, onDismiss: () -> Unit, onDeleted: () -> Unit) {
     var deleteBusy by remember { mutableStateOf(false) }
+    var overflowExpanded by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var playerError by remember(story.id) { mutableStateOf<String?>(null) }
+    var isBuffering by remember(story.id) { mutableStateOf(story.mediaType == "video/mp4") }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val storyBackdrop = rememberLayerBackdrop()
     val mediaUrl = BuildConfig.API_BASE_URL.trimEnd('/') + story.mediaUrl
+    val isVideo = story.mediaType.equals("video/mp4", ignoreCase = true)
+    val storyPlayer = remember(story.id, api.token) {
+        createMedia3Player(context, api.token).apply {
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 1f
+        }
+    }
     val bitmap by produceState<Bitmap?>(initialValue = null, story.id, story.mediaType) {
         if (story.mediaType.startsWith("image/")) {
             value = withContext(Dispatchers.IO) {
                 val connection = (URL(mediaUrl).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000; readTimeout = 20000
+                    connectTimeout = 12000
+                    readTimeout = 20000
                     api.token?.let { setRequestProperty("Authorization", "Bearer $it") }
                 }
                 try {
@@ -614,42 +629,177 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             }
         }
     }
-    Dialog(onDismissRequest = onDismiss) {
-        Box(Modifier.fillMaxWidth().fillMaxHeight(.88f).clip(RoundedCornerShape(24.dp)).background(Color.Black)) {
-            if (story.mediaType == "video/mp4") {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx -> VideoView(ctx).apply {
-                        setVideoURI(Uri.parse(mediaUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
-                        setOnPreparedListener { it.isLooping = true; start() }
-                    } }
-                )
-            } else if (bitmap != null) {
-                Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
+
+    DisposableEffect(storyPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == Player.STATE_BUFFERING
             }
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(14.dp)) {
-                Text("@${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
-                if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
-            }
-            Row(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (story.authorId == currentUserId) {
-                    TextButton(enabled = !deleteBusy, onClick = {
-                        deleteBusy = true
-                        scope.launch {
-                            runCatching { api.deleteStory(story.id) }
-                                .onSuccess { onDeleted() }
-                                .onFailure { deleteBusy = false }
-                        }
-                    }) { Text("Удалить", color = Color.White) }
+            override fun onPlayerError(error: PlaybackException) {
+                isBuffering = false
+                playerError = when (error.errorCode) {
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "Сервер отклонил запрос видео."
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Нет соединения с сервером."
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> "Формат видео не поддерживается."
+                    else -> "Не удалось загрузить видео (${error.errorCodeName})."
                 }
-                TextButton(onClick = onDismiss) { Text("Закрыть", color = Color.White) }
+            }
+        }
+        storyPlayer.addListener(listener)
+        onDispose {
+            storyPlayer.removeListener(listener)
+            storyPlayer.release()
+        }
+    }
+
+    LaunchedEffect(story.id, mediaUrl, isVideo) {
+        if (isVideo) {
+            playerError = null
+            isBuffering = true
+            storyPlayer.setMediaItem(MediaItem.fromUri(mediaUrl))
+            storyPlayer.prepare()
+            storyPlayer.playWhenReady = true
+        } else {
+            storyPlayer.pause()
+            storyPlayer.clearMediaItems()
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        CompositionLocalProvider(LocalLiquidGlassBackdrop provides storyBackdrop) {
+            Box(
+                Modifier.fillMaxWidth().fillMaxHeight(.88f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black)
+            ) {
+                if (isVideo) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop),
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                this.player = storyPlayer
+                                useController = false
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                                setKeepContentOnPlayerReset(true)
+                            }
+                        },
+                        update = { view ->
+                            if (view.player !== storyPlayer) view.player = storyPlayer
+                        },
+                        onRelease = { view -> view.player = null }
+                    )
+                    if (isBuffering && playerError == null) {
+                        Box(Modifier.align(Alignment.Center).size(54.dp).liquidGlass(theme, CircleShape, .9f), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(25.dp), color = Color.White, strokeWidth = 2.dp)
+                        }
+                    }
+                    playerError?.let { message ->
+                        Column(
+                            Modifier.align(Alignment.Center).padding(24.dp)
+                                .liquidGlass(theme, RoundedCornerShape(20.dp), .98f)
+                                .padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.CloudOff, null, tint = Color.White, modifier = Modifier.size(30.dp))
+                            Text(message, color = Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            TextButton(onClick = {
+                                playerError = null
+                                isBuffering = true
+                                storyPlayer.seekTo(0)
+                                storyPlayer.prepare()
+                                storyPlayer.playWhenReady = true
+                            }) { Text("Повторить", color = theme.accent) }
+                        }
+                    }
+                } else if (bitmap != null) {
+                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = theme.accent)
+                    }
+                }
+
+                Column(
+                    Modifier.align(Alignment.TopStart).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .64f), Color.Black.copy(alpha = .12f), Color.Transparent)))
+                        .padding(start = 14.dp, top = 16.dp, end = 116.dp, bottom = 22.dp)
+                ) {
+                    Text("@\${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
+                    if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
+                }
+
+                Row(
+                    Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (story.authorId == currentUserId) {
+                        Box {
+                            Box(
+                                Modifier.size(44.dp).liquidGlass(theme, CircleShape, 1f)
+                                    .clickable(enabled = !deleteBusy) { overflowExpanded = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (deleteBusy) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp, color = Color.White)
+                                else Icon(Icons.Default.MoreVert, "Дополнительные действия", tint = Color.White, modifier = Modifier.size(21.dp))
+                            }
+                            DropdownMenu(
+                                expanded = overflowExpanded,
+                                onDismissRequest = { overflowExpanded = false },
+                                modifier = Modifier.liquidGlass(theme, RoundedCornerShape(16.dp), .98f),
+                                containerColor = Color.Transparent
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Удалить историю", color = Color(0xFFFF8294)) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF8294)) },
+                                    enabled = !deleteBusy,
+                                    onClick = {
+                                        overflowExpanded = false
+                                        confirmDelete = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box(
+                        Modifier.size(44.dp).liquidGlass(theme, CircleShape, 1f)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Close, "Закрыть историю", tint = Color.White, modifier = Modifier.size(21.dp))
+                    }
+                }
             }
         }
     }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!deleteBusy) confirmDelete = false },
+            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .98f),
+            containerColor = Color.Transparent,
+            title = { Text("Удалить историю?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Эта история будет удалена без возможности восстановления.", color = theme.secondary) },
+            confirmButton = {
+                TextButton(enabled = !deleteBusy, onClick = {
+                    deleteBusy = true
+                    scope.launch {
+                        runCatching { api.deleteStory(story.id) }
+                            .onSuccess { onDeleted() }
+                            .onFailure { deleteBusy = false; confirmDelete = false }
+                    }
+                }) {
+                    if (deleteBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.accent)
+                    else Text("Удалить", color = Color(0xFFFF8294))
+                }
+            },
+            dismissButton = { TextButton(enabled = !deleteBusy, onClick = { confirmDelete = false }) { Text("Отмена", color = theme.secondary) } }
+        )
+    }
 }
-
 @Composable
 private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> Unit) {
     var query by remember { mutableStateOf("") }
@@ -1841,10 +1991,17 @@ private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float 
     val backdrop = LocalLiquidGlassBackdrop.current
     val glassFill = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = .15f * intensity),
+            Color.White.copy(alpha = .24f * intensity),
             theme.surface.copy(alpha = .58f),
             theme.background.copy(alpha = .48f),
-            theme.surface.copy(alpha = .66f)
+            Color.White.copy(alpha = .13f * intensity)
+        )
+    )
+    val gloss = Brush.radialGradient(
+        colors = listOf(
+            Color.White.copy(alpha = .28f * intensity),
+            Color.White.copy(alpha = .07f * intensity),
+            Color.Transparent
         )
     )
     val base = this.shadow(18.dp, shape, clip = false).clip(shape)
@@ -1855,18 +2012,18 @@ private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float 
             effects = {
                 vibrancy()
                 blur((18f * intensity).dp.toPx())
-                if (Build.VERSION.SDK_INT >= 33) {
-                    lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
-                }
+                lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
             },
             onDrawSurface = { drawRect(glassFill) }
         )
     } else {
-        base.background(glassFill)
+        // Android 12 and 12L do not support the backdrop lens path used on API 33+.
+        // Layered specular gradients preserve a visible glass appearance on those devices.
+        base.background(glassFill).background(gloss)
     }
     return surface
-        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .38f), Color.White.copy(alpha = .08f), theme.accent.copy(alpha = .16f))), shape)
-        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .20f), Color.Transparent)), shape)
+        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .52f * intensity), Color.White.copy(alpha = .10f), theme.accent.copy(alpha = .22f * intensity))), shape)
+        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .26f * intensity), Color.Transparent)), shape)
 }
 
 @Composable
