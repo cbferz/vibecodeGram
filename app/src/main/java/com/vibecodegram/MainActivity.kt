@@ -47,7 +47,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -69,12 +69,12 @@ import androidx.compose.ui.semantics.selected
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.catalog.components.LiquidBottomTab
 import com.kyant.backdrop.catalog.components.LiquidBottomTabs
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.Shadow
 import kotlin.math.roundToInt
 import com.vibecodegram.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +98,10 @@ private fun createMedia3Player(context: Context, token: String?): ExoPlayer {
 
 private data class Palette(val name: String, val background: Color, val surface: Color, val accent: Color, val secondary: Color, val glow: Color)
 
-private val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+private val LocalLiquidGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
+private val LocalLiquidGlassWindowBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
+private val LocalGlassIntensity = compositionLocalOf { .72f }
+private val LocalNavigationInset = compositionLocalOf { 0.dp }
 private val palettes = listOf(
     Palette("Graphite", Color(0xFF090B10), Color(0xFF191E28), Color(0xFFE6EAF2), Color(0xFF8D9AAA), Color(0xFF52647B)),
     Palette("Midnight", Color(0xFF080D1A), Color(0xFF17243A), Color(0xFF69C9FF), Color(0xFF9BB6D2), Color(0xFF17669A)),
@@ -153,8 +156,10 @@ private fun ProfileEditDialog(profile: ApiProfile, theme: Palette, onDismiss: ()
     var location by remember(profile.id) { mutableStateOf(profile.location) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+        modifier = Modifier.glassPanel(theme, RoundedCornerShape(24.dp), .96f),
+        shape = RoundedCornerShape(24.dp),
         containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
         title = { Text("Редактирование профиля", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -199,7 +204,8 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
     }
     val base = palettes[paletteIndex]
     val theme = base.copy(accent = if (accentIndex >= 0) accents[accentIndex] else base.accent)
-    val backdrop = rememberLayerBackdrop()
+    val backdrop = rememberGlassBackdrop()
+    val backgroundBackdrop = rememberGlassBackdrop()
     val destinations = listOf(
         Destination("Лента", Icons.Default.Home, "Твоя лента"),
         Destination("vibees", Icons.Default.PlayCircle, "Короткие видео"),
@@ -207,7 +213,11 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
         Destination("Профиль", Icons.Default.Person, "Профиль")
     )
     MaterialTheme(colorScheme = darkColorScheme(primary = theme.accent, background = theme.background, surface = theme.surface, onPrimary = theme.background, onBackground = Color.White, onSurface = Color.White)) {
-        CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdrop) {
+        CompositionLocalProvider(
+            LocalLiquidGlassBackdrop provides backgroundBackdrop,
+            LocalLiquidGlassWindowBackdrop provides backdrop,
+            LocalGlassIntensity provides glass
+        ) {
         if (!authReady) {
             Box(Modifier.fillMaxSize().background(theme.background), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = theme.accent)
@@ -216,23 +226,25 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
             AuthScreen(theme, api) { currentUser = it }
         } else {
         Scaffold(
-            containerColor = theme.background,
+            containerColor = Color.Transparent,
             bottomBar = {
                 LiquidGlassNavigationBar(destinations, page, { page = it }, backdrop, theme, glass,
                     Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp))
             }
         ) { padding ->
             Box(
-                Modifier.fillMaxSize().layerBackdrop(backdrop)
-                    .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background)))
-                    .padding(padding)
+                Modifier.fillMaxSize().glassBackdropSource(backdrop)
             ) {
-                Column(Modifier.fillMaxSize()) {
+                // Cards sample wallpaper only; navigation and windows sample the screen.
+                Box(Modifier.matchParentSize().glassBackdropSource(backgroundBackdrop)
+                    .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha = .30f), theme.background, theme.background))))
+                CompositionLocalProvider(LocalNavigationInset provides padding.calculateBottomPadding()) {
+                Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
                     AppHeader(theme, onSearch = { page = 4 }, onNotifications = { page = 5 }, onSettings = { editor = true })
                     when (page) {
                         0 -> FeedScreen(theme, compact, api, currentUser!!.id)
-                        1 -> ReelsScreen(theme, api)
-                        2 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = 0.dp, api = api)
+                        1 -> Box(Modifier.weight(1f).padding(bottom = padding.calculateBottomPadding())) { ReelsScreen(theme, api) }
+                        2 -> ChatsScreen(theme, search, { search = it }, folder, { folder = it }, compact, onOpenChat = { openedChat = it }, bottomInset = padding.calculateBottomPadding(), api = api)
                         4 -> if (selectedProfile != null) {
                             PublicProfileScreen(theme, api, selectedProfile!!, onBack = { selectedProfile = null })
                         } else SearchScreen(theme, api, onOpenChat = { openedChat = it }, onOpenProfile = { selectedProfile = it })
@@ -242,9 +254,10 @@ private fun vibecodeGramApp(prefs: android.content.SharedPreferences) {
                             currentUser!!, api, onLogout = { appScope.launch { api.logout(); currentUser = null } },
                             onCustomize = { editor = true },
                             onProfileColors = { profileEditor = true },
-                            bottomInset = 0.dp
+                            bottomInset = padding.calculateBottomPadding()
                         )
                     }
+                }
                 }
             }
         }
@@ -516,7 +529,7 @@ private fun StoriesStrip(theme: Palette, api: ApiClient, currentUserId: Long) {
                 Modifier.width(68.dp).clickable { create = true },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(Modifier.size(58.dp).clip(CircleShape).background(theme.surface).border(1.5.dp, theme.accent, CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(58.dp).liquidGlass(theme, CircleShape, .8f, surfaceTint = theme.accent.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Add, "Добавить историю", tint = theme.accent, modifier = Modifier.size(28.dp))
                 }
                 Spacer(Modifier.height(5.dp))
@@ -560,8 +573,10 @@ private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> U
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selectedUri = it }
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+        modifier = Modifier.glassPanel(theme, RoundedCornerShape(24.dp), .96f),
+        shape = RoundedCornerShape(24.dp),
         containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
         title = { Text("Новая история", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -575,7 +590,15 @@ private fun CreateStoryDialog(theme: Palette, api: ApiClient, onDismiss: () -> U
                         Text("Исчезнет через $duration ч")
                         Icon(Icons.Default.ExpandMore, null)
                     }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.glassPanel(theme, RoundedCornerShape(18.dp), active = expanded),
+                        shape = RoundedCornerShape(18.dp),
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp
+                    ) {
                         listOf(5, 12, 24, 48).forEach { hours ->
                             DropdownMenuItem(text = { Text("$hours часов") }, onClick = { duration = hours; expanded = false })
                         }
@@ -609,7 +632,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
     var isBuffering by remember(story.id) { mutableStateOf(story.mediaType == "video/mp4") }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val storyBackdrop = rememberLayerBackdrop()
+    val storyBackdrop = rememberGlassBackdrop()
     val mediaUrl = BuildConfig.API_BASE_URL.trimEnd('/') + story.mediaUrl
     val isVideo = story.mediaType.equals("video/mp4", ignoreCase = true)
     val storyPlayer = remember(story.id, api.token) {
@@ -671,7 +694,10 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
     }
 
     Dialog(onDismissRequest = onDismiss) {
-        CompositionLocalProvider(LocalLiquidGlassBackdrop provides storyBackdrop) {
+        CompositionLocalProvider(
+            LocalLiquidGlassBackdrop provides storyBackdrop,
+            LocalLiquidGlassWindowBackdrop provides storyBackdrop
+        ) {
             Box(
                 Modifier.fillMaxWidth().fillMaxHeight(.88f)
                     .clip(RoundedCornerShape(24.dp))
@@ -679,7 +705,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             ) {
                 if (isVideo) {
                     AndroidView(
-                        modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop),
+                        modifier = Modifier.fillMaxSize().glassBackdropSource(storyBackdrop),
                         factory = { ctx ->
                             PlayerView(ctx).apply {
                                 this.player = storyPlayer
@@ -719,7 +745,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
                         }
                     }
                 } else if (bitmap != null) {
-                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize().glassBackdropSource(storyBackdrop), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = theme.accent)
@@ -753,8 +779,11 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
                             DropdownMenu(
                                 expanded = overflowExpanded,
                                 onDismissRequest = { overflowExpanded = false },
-                                modifier = Modifier.liquidGlass(theme, RoundedCornerShape(16.dp), .98f),
-                                containerColor = Color.Transparent
+                                modifier = Modifier.glassPanel(theme, RoundedCornerShape(16.dp), .98f, active = overflowExpanded),
+                                shape = RoundedCornerShape(16.dp),
+                                containerColor = Color.Transparent,
+                                tonalElevation = 0.dp,
+                                shadowElevation = 0.dp
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Удалить историю", color = Color(0xFFFF8294)) },
@@ -782,8 +811,10 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { if (!deleteBusy) confirmDelete = false },
-            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .98f),
+            modifier = Modifier.glassPanel(theme, RoundedCornerShape(24.dp), .98f, source = storyBackdrop),
+            shape = RoundedCornerShape(24.dp),
             containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
             title = { Text("Удалить историю?", color = Color.White, fontWeight = FontWeight.Bold) },
             text = { Text("Эта история будет удалена без возможности восстановления.", color = theme.secondary) },
             confirmButton = {
@@ -835,7 +866,7 @@ private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> U
             error != null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xFFFF8294)) }
             query.trim().length < 2 -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text("Введи минимум 2 символа.", color = theme.secondary) }
             users.isEmpty() && posts.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Text("Ничего не найдено.", color = theme.secondary) }
-            else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + LocalNavigationInset.current), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 if (users.isNotEmpty()) item { Text("Пользователи", color = theme.accent, fontWeight = FontWeight.Bold) }
                 items(users, key = { "u${it.id}" }) { user ->
                     var followed by remember(user.id) { mutableStateOf(false) }
@@ -900,7 +931,7 @@ private fun PublicProfileScreen(theme: Palette, api: ApiClient, user: ApiUser, o
         runCatching { api.userPosts(user.id, "vibees") }.onSuccess { vibees = it }
         mediaLoading = false
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp + LocalNavigationInset.current)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад", tint = Color.White) }
             Text("Профиль", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -942,8 +973,7 @@ private fun PublicProfileScreen(theme: Palette, api: ApiClient, user: ApiUser, o
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(18.dp), .95f).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             listOf("Посты", "Видео", "vibees").forEachIndexed { index, label ->
-                Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                    .background(if (selectedTab == index) Color.White.copy(alpha = .16f) else Color.Transparent)
+                Box(Modifier.weight(1f).then(if (selectedTab == index) Modifier.liquidGlass(theme, RoundedCornerShape(14.dp), .9f, surfaceTint = theme.accent.copy(alpha = .12f)) else Modifier.clip(RoundedCornerShape(14.dp)))
                     .clickable { selectedTab = index }.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                     Text(label, color = if (selectedTab == index) Color.White else theme.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
@@ -991,7 +1021,7 @@ private fun NotificationsScreen(theme: Palette, api: ApiClient) {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xFFFF8294)) }
             notifications.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Пока нет уведомлений.", color = theme.secondary) }
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + LocalNavigationInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(notifications, key = { it.id }) { item ->
                     GlassCard(theme) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1091,7 +1121,7 @@ private fun FeedScreen(theme: Palette, compact: Boolean, api: ApiClient, current
             }
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 18.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 18.dp + LocalNavigationInset.current),
                 verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)
             ) {
                 items(posts, key = { it.id }) { post ->
@@ -1222,7 +1252,11 @@ private fun FeedPostCard(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.liquidGlass(theme, RoundedCornerShape(18.dp), .96f).widthIn(min = 190.dp)
+                    modifier = Modifier.widthIn(min = 190.dp).glassPanel(theme, RoundedCornerShape(18.dp), .96f, active = menuExpanded),
+                    shape = RoundedCornerShape(18.dp),
+                    containerColor = Color.Transparent,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp
                 ) {
                     DropdownMenuItem(
                         text = { Text("Скрыть публикацию", color = Color.White) },
@@ -1254,11 +1288,7 @@ private fun FeedPostCard(
         }
         if (post.tag.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
-            Surface(
-                color = theme.accent.copy(alpha = .13f),
-                shape = RoundedCornerShape(11.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .12f))
-            ) {
+            Box(Modifier.liquidGlass(theme, RoundedCornerShape(11.dp), .7f, surfaceTint = theme.accent.copy(alpha = .13f))) {
                 Text("#${post.tag}", color = theme.accent, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
@@ -1281,8 +1311,10 @@ private fun FeedPostCard(
     if (reportDialog) {
         AlertDialog(
             onDismissRequest = { reportDialog = false },
-            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(24.dp), .96f),
+            modifier = Modifier.glassPanel(theme, RoundedCornerShape(24.dp), .96f),
+            shape = RoundedCornerShape(24.dp),
             containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
             title = { Text("Пожаловаться на публикацию", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
@@ -1334,7 +1366,8 @@ private fun CreatePostDialog(
     }
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(26.dp), .94f),
+        modifier = Modifier.glassPanel(theme, RoundedCornerShape(26.dp), .94f),
+        shape = RoundedCornerShape(26.dp),
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         title = { Text(title, color = Color.White, fontWeight = FontWeight.Bold) },
@@ -1401,11 +1434,11 @@ private fun ChatsScreen(theme: Palette, search: String, onSearch: (String) -> Un
         }
         OutlinedTextField(
             value = search, onValueChange = onSearch,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).liquidGlass(theme, RoundedCornerShape(18.dp), .75f),
             placeholder = { Text("Поиск по чатам") },
             leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
             shape = RoundedCornerShape(18.dp),
-            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.White.copy(alpha = .12f), focusedBorderColor = theme.accent, unfocusedTextColor = Color.White, focusedTextColor = Color.White)
+            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.Transparent, focusedBorderColor = theme.accent, unfocusedTextColor = Color.White, focusedTextColor = Color.White)
         )
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             listOf("Все", "Личные", "Группы").forEach { label ->
@@ -1466,7 +1499,7 @@ private fun NewChatDialog(theme: Palette, api: ApiClient, onDismiss: () -> Unit,
         loading = false
     }
     Dialog(onDismissRequest = { if (busyUser == null) onDismiss() }) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.78f).liquidGlass(theme, RoundedCornerShape(24.dp), .94f), color = Color.Transparent, shape = RoundedCornerShape(24.dp)) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.78f).glassPanel(theme, RoundedCornerShape(24.dp), .94f), color = Color.Transparent, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Новый диалог", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -1518,7 +1551,7 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, api: ApiClient, currentUs
     }
     LaunchedEffect(chat.id) { refresh() }
     Dialog(onDismissRequest=onClose) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f).liquidGlass(theme,RoundedCornerShape(24.dp),.94f),shape=RoundedCornerShape(24.dp),color=Color.Transparent,tonalElevation=0.dp) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.88f).glassPanel(theme,RoundedCornerShape(24.dp),.94f),shape=RoundedCornerShape(24.dp),color=Color.Transparent,tonalElevation=0.dp) {
             Column(Modifier.fillMaxSize().padding(14.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically){Avatar(chat.name.take(1),theme.accent,42);Spacer(Modifier.width(10.dp));Text(chat.name,color=Color.White,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));IconButton(onClick=onClose){Icon(Icons.Default.Close,"Закрыть",tint=theme.secondary)}}
                 Divider(color=Color.White.copy(alpha=.1f))
@@ -1528,7 +1561,7 @@ private fun ChatRoomDialog(chat: Chat, theme: Palette, api: ApiClient, currentUs
                     items(messages,key={it.id}) { m ->
                         val outgoing=m.senderId==currentUserId
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=if(outgoing)Arrangement.End else Arrangement.Start) {
-                            Column(Modifier.widthIn(max=280.dp).liquidGlass(theme,RoundedCornerShape(16.dp),if(outgoing).58f else .82f).padding(12.dp)) {
+                            Column(Modifier.widthIn(max=280.dp).liquidGlass(theme,RoundedCornerShape(16.dp),if(outgoing).58f else .82f, surfaceTint = if (outgoing) theme.accent.copy(alpha = .14f) else Color.Transparent).padding(12.dp)) {
                                 if(!outgoing) Text(m.username,color=theme.accent,fontSize=10.sp,fontWeight=FontWeight.Bold)
                                 Text(m.body,color=Color.White,fontSize=14.sp,lineHeight=19.sp)
                                 Text(m.createdAt.replace("T"," ").take(16),color=theme.secondary,fontSize=9.sp,modifier=Modifier.align(Alignment.End))
@@ -1608,9 +1641,7 @@ private fun ProfileScreen(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp + bottomInset), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(8.dp))
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                .background(Brush.verticalGradient(listOf(profileColor.copy(alpha = .18f), theme.surface.copy(alpha = .96f))))
-                .border(1.dp, profileColor.copy(alpha = .42f), RoundedCornerShape(28.dp))
+            Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(28.dp), .9f, surfaceTint = profileColor.copy(alpha = .18f))
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -1671,8 +1702,7 @@ private fun ProfileScreen(
         Row(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(18.dp), .95f).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             listOf("Посты", "Видео", "vibees").forEachIndexed { index, label ->
                 Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                        .background(if (profileTab == index) Color.White.copy(alpha = .16f) else Color.Transparent)
+                    Modifier.weight(1f).then(if (profileTab == index) Modifier.liquidGlass(theme, RoundedCornerShape(14.dp), .9f, surfaceTint = theme.accent.copy(alpha = .12f)) else Modifier.clip(RoundedCornerShape(14.dp)))
                         .clickable { profileTab = index }.padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1976,7 +2006,8 @@ private fun ProfileColorEditor(
     val presets = listOf(205f, 265f, 325f, 350f, 18f, 42f, 125f, 165f)
     AlertDialog(
         onDismissRequest = onClose,
-        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(28.dp), .92f),
+        modifier = Modifier.glassPanel(theme, RoundedCornerShape(28.dp), .92f),
+        shape = RoundedCornerShape(28.dp),
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         title = { Text("Цвет профиля", color = Color.White, fontWeight = FontWeight.Bold) },
@@ -1988,7 +2019,7 @@ private fun ProfileColorEditor(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(54.dp).clip(CircleShape).background(Color.White.copy(alpha = .22f)), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(54.dp).liquidGlass(theme, CircleShape, .85f, surfaceTint = color.copy(alpha = .22f)), contentAlignment = Alignment.Center) {
                             Text("V", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
                         }
                         Spacer(Modifier.width(12.dp))
@@ -2074,7 +2105,8 @@ private fun ServerStatusCard(theme: Palette) {
 private fun AppearanceEditor(paletteIndex: Int, accentIndex: Int, glass: Float, compact: Boolean, theme: Palette, onPalette: (Int) -> Unit, onAccent: (Int) -> Unit, onGlass: (Float) -> Unit, onCompact: (Boolean) -> Unit, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
-        modifier = Modifier.liquidGlass(theme, RoundedCornerShape(28.dp), .92f),
+        modifier = Modifier.glassPanel(theme, RoundedCornerShape(28.dp), .92f),
+        shape = RoundedCornerShape(28.dp),
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Palette, null, tint = theme.accent); Spacer(Modifier.width(9.dp)); Text("Настройка внешнего вида", color = Color.White, fontSize = 19.sp) } },
@@ -2083,7 +2115,7 @@ private fun AppearanceEditor(paletteIndex: Int, accentIndex: Int, glass: Float, 
                 Text("ЦВЕТОВАЯ ТЕМА", color = theme.secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Spacer(Modifier.height(10.dp))
                 palettes.forEachIndexed { index, palette ->
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(if (index == paletteIndex) theme.accent.copy(alpha = .12f) else Color.Transparent).clickable { onPalette(index) }.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().then(if (index == paletteIndex) Modifier.liquidGlass(theme, RoundedCornerShape(13.dp), .7f, surfaceTint = theme.accent.copy(alpha = .12f)) else Modifier.clip(RoundedCornerShape(13.dp))).clickable { onPalette(index) }.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             listOf(palette.background, palette.surface, palette.accent, palette.glow).forEach { color -> Box(Modifier.size(21.dp).clip(CircleShape).background(color)) }
                         }
@@ -2139,43 +2171,69 @@ private fun GlassCard(theme: Palette, compact: Boolean = false, modifier: Modifi
 }
 
 @Composable
-private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float = .8f): Modifier {
-    val backdrop = LocalLiquidGlassBackdrop.current
-    val glassFill = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = .24f * intensity),
-            theme.surface.copy(alpha = .58f),
-            theme.background.copy(alpha = .48f),
-            Color.White.copy(alpha = .13f * intensity)
-        )
-    )
-    val gloss = Brush.radialGradient(
-        colors = listOf(
-            Color.White.copy(alpha = .28f * intensity),
-            Color.White.copy(alpha = .07f * intensity),
-            Color.Transparent
-        )
-    )
-    val base = this.shadow(18.dp, shape, clip = false).clip(shape)
-    val surface = if (backdrop != null && Build.VERSION.SDK_INT >= 33) {
-        base.drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                vibrancy()
-                blur((18f * intensity).dp.toPx())
-                lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
-            },
-            onDrawSurface = { drawRect(glassFill) }
-        )
-    } else {
-        // Android 12 and 12L do not support the backdrop lens path used on API 33+.
-        // Layered specular gradients preserve a visible glass appearance on those devices.
-        base.background(glassFill).background(gloss)
+private fun Modifier.liquidGlass(
+    theme: Palette,
+    shape: Shape,
+    intensity: Float = .8f,
+    surfaceTint: Color = Color.Transparent
+): Modifier = kyantGlass(theme, shape, intensity, LocalLiquidGlassBackdrop.current, false, surfaceTint)
+
+@Composable
+private fun Modifier.glassPanel(
+    theme: Palette,
+    shape: Shape,
+    intensity: Float = .9f,
+    active: Boolean = true,
+    source: GlassBackdrop? = LocalLiquidGlassWindowBackdrop.current
+): Modifier {
+    DisposableEffect(source, active) {
+        if (active && source != null) source.readers++
+        onDispose { if (active && source != null) source.readers-- }
     }
-    return surface
-        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .52f * intensity), Color.White.copy(alpha = .10f), theme.accent.copy(alpha = .22f * intensity))), shape)
-        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .26f * intensity), Color.Transparent)), shape)
+    return kyantGlass(theme, shape, intensity, source, true, Color.Transparent)
+}
+
+@Composable
+private fun Modifier.kyantGlass(
+    theme: Palette,
+    shape: Shape,
+    intensity: Float,
+    source: GlassBackdrop?,
+    panel: Boolean,
+    surfaceTint: Color
+): Modifier {
+    val strength = (intensity * LocalGlassIntensity.current).coerceIn(.1f, 1f)
+    // Blur is supported from API 31; AGSL refraction from API 33.
+    // On older devices use an opaque surface, not simulated glass.
+    if (source == null || Build.VERSION.SDK_INT < 31) {
+        return background(theme.surface, shape).background(surfaceTint, shape).clip(shape)
+    }
+    val tint = theme.surface.copy(alpha = if (panel) .68f - .18f * strength else .40f - .20f * strength)
+    return drawWithContent {
+        source.frame
+        drawContent()
+    }.drawBackdrop(
+        backdrop = source,
+        shape = { shape },
+        effects = {
+            colorControls(brightness = .03f, contrast = 1.12f, saturation = 1.15f)
+            blur(((if (panel) 10f else 8f) * strength).dp.toPx())
+            if (Build.VERSION.SDK_INT >= 33) {
+                lens(
+                    ((if (panel) 24f else 12f) * strength).dp.toPx(),
+                    ((if (panel) 24f else 18f) * strength).dp.toPx(),
+                    depthEffect = true,
+                    chromaticAberration = false
+                )
+            }
+        },
+        highlight = { Highlight.Default.copy(alpha = .35f + .65f * strength) },
+        shadow = { Shadow(radius = 8.dp, color = Color.Black.copy(alpha = .12f)) },
+        onDrawSurface = {
+            drawRect(tint)
+            if (surfaceTint != Color.Transparent) drawRect(surfaceTint)
+        }
+    ).clip(shape)
 }
 
 @Composable
@@ -2188,13 +2246,13 @@ private fun LiquidGlassNavigationBar(
     intensity: Float,
     modifier: Modifier = Modifier
 ) {
-    var shown by remember { mutableIntStateOf(selectedIndex) }
-    LaunchedEffect(selectedIndex) { shown = selectedIndex }
+    var shown by remember { mutableIntStateOf(selectedIndex.coerceIn(items.indices)) }
+    LaunchedEffect(selectedIndex) { if (selectedIndex in items.indices) shown = selectedIndex }
     val shownState = rememberUpdatedState(shown)
     val selectedTabIndex = remember { { shownState.value } }
     val selectedState = rememberUpdatedState(selectedIndex)
     val onSelectedState = rememberUpdatedState(onSelected)
-    val blurs = Build.VERSION.SDK_INT >= 33
+    val blurs = Build.VERSION.SDK_INT >= 31
     val refracts = Build.VERSION.SDK_INT >= 33
 
     LiquidBottomTabs(
@@ -2243,8 +2301,12 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
         diagnostics.edit().putString("auth_stage", stage).putString("auth_detail", detail.take(500))
             .putLong("auth_stage_time", System.currentTimeMillis()).apply()
     }
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(theme.glow.copy(alpha=.28f), theme.background, theme.background))).padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxWidth().liquidGlass(theme, RoundedCornerShape(28.dp), .92f).padding(22.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
+    val authBackdrop = rememberGlassBackdrop()
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(Modifier.matchParentSize().glassBackdropSource(authBackdrop)
+            .background(Brush.verticalGradient(listOf(theme.glow.copy(alpha=.28f), theme.background, theme.background))))
+        CompositionLocalProvider(LocalLiquidGlassBackdrop provides authBackdrop) {
+        Column(Modifier.fillMaxWidth().padding(24.dp).liquidGlass(theme, RoundedCornerShape(28.dp), .92f).padding(22.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("vibecodeGram", color=Color.White, fontSize=29.sp, fontWeight=FontWeight.Black)
             Text(if(register) "Создай аккаунт" else "С возвращением", color=theme.accent, fontSize=19.sp, fontWeight=FontWeight.Bold)
             Text("Аккаунт и переписки синхронизируются через сервер.", color=theme.secondary, fontSize=12.sp)
@@ -2319,6 +2381,7 @@ private fun AuthScreen(theme: Palette, api: ApiClient, onAuthenticated: (ApiUser
                 Text("Отправить отчёт о сбое", color = theme.accent)
             }
             diagnosticsMessage?.let { Text(it, color = Color(0xFFFF8294), fontSize = 11.sp) }
+        }
         }
     }
 }
