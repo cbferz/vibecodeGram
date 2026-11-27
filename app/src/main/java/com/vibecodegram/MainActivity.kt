@@ -1992,10 +1992,17 @@ private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float 
     val backdrop = LocalLiquidGlassBackdrop.current
     val glassFill = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = .15f * intensity),
+            Color.White.copy(alpha = .24f * intensity),
             theme.surface.copy(alpha = .58f),
             theme.background.copy(alpha = .48f),
-            theme.surface.copy(alpha = .66f)
+            Color.White.copy(alpha = .13f * intensity)
+        )
+    )
+    val gloss = Brush.radialGradient(
+        colors = listOf(
+            Color.White.copy(alpha = .28f * intensity),
+            Color.White.copy(alpha = .07f * intensity),
+            Color.Transparent
         )
     )
     val base = this.shadow(18.dp, shape, clip = false).clip(shape)
@@ -2006,18 +2013,18 @@ private fun Modifier.liquidGlass(theme: Palette, shape: Shape, intensity: Float 
             effects = {
                 vibrancy()
                 blur((18f * intensity).dp.toPx())
-                if (Build.VERSION.SDK_INT >= 33) {
-                    lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
-                }
+                lens((17f * intensity).dp.toPx(), (17f * intensity).dp.toPx(), depthEffect = true)
             },
             onDrawSurface = { drawRect(glassFill) }
         )
     } else {
-        base.background(glassFill)
+        // Android 12 and 12L do not support the backdrop lens path used on API 33+.
+        // Layered specular gradients preserve a visible glass appearance on those devices.
+        base.background(glassFill).background(gloss)
     }
     return surface
-        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .38f), Color.White.copy(alpha = .08f), theme.accent.copy(alpha = .16f))), shape)
-        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .20f), Color.Transparent)), shape)
+        .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .52f * intensity), Color.White.copy(alpha = .10f), theme.accent.copy(alpha = .22f * intensity))), shape)
+        .border(.6.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .26f * intensity), Color.Transparent)), shape)
 }
 
 @Composable
