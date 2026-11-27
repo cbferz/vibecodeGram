@@ -108,6 +108,13 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
+      - name: Generate Android launcher icons from repository asset
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m pip install --user --break-system-packages Pillow
+          python3 scripts/generate_android_icons.py
+
       - name: Build Release APK only
         shell: bash
         run: |
