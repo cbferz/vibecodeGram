@@ -672,8 +672,8 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             Box(
                 Modifier.fillMaxWidth().fillMaxHeight(.88f)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color.Black)
                     .layerBackdrop(storyBackdrop)
+                    .background(Color.Black)
             ) {
                 if (isVideo) {
                     AndroidView(
