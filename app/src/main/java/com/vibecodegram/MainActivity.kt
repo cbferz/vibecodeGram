@@ -332,7 +332,7 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                 posts = it.filter { post -> post.contentKind == "reel" && post.videoUrl.isNotBlank() }
                 if (posts.isEmpty()) player.stop()
             }
-            .onFailure { error = it.message ?: "Не удалось загрузить Reels" }
+            .onFailure { error = it.message ?: "Не удалось загрузить vibees" }
         loading = false
     }
 
@@ -384,9 +384,9 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
         ) {
             Icon(Icons.Default.VideoLibrary, null, tint = theme.secondary, modifier = Modifier.size(48.dp))
             Spacer(Modifier.height(12.dp))
-            Text("Reels пока нет", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text("vibees пока нет", color = Color.White, fontWeight = FontWeight.SemiBold)
             Text("Короткие видео публикуются отдельно от видео в обычных постах.", color = theme.secondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
-            TextButton(onClick = { composer = true }) { Text("Создать Reels", color = theme.accent) }
+            TextButton(onClick = { composer = true }) { Text("Создать vibees", color = theme.accent) }
             TextButton(onClick = { refreshKey++ }) { Text("Обновить", color = theme.secondary) }
         }
         else -> Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -466,9 +466,9 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
                 Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Reels", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-                IconButton(onClick = { composer = true }) { Icon(Icons.Default.Add, "Создать Reels", tint = Color.White) }
-                IconButton(onClick = { refreshKey++ }) { Icon(Icons.Default.Refresh, "Обновить Reels", tint = Color.White) }
+                Text("vibees", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+                IconButton(onClick = { composer = true }) { Icon(Icons.Default.Add, "Создать vibees", tint = Color.White) }
+                IconButton(onClick = { refreshKey++ }) { Icon(Icons.Default.Refresh, "Обновить vibees", tint = Color.White) }
             }
         }
     }
@@ -476,14 +476,14 @@ private fun ReelsScreen(theme: Palette, api: ApiClient) {
     if (composer) {
         CreatePostDialog(
             theme = theme,
-            title = "Новое Reels",
-            publishLabel = "Опубликовать Reels",
+            title = "Новые vibees",
+            publishLabel = "Опубликовать vibees",
             requireVideo = true,
             onDismiss = { composer = false },
             onPublish = { body, tag, videoUri ->
                 scope.launch {
                     runCatching {
-                        api.createPost(body.ifBlank { "Reels" }, tag, videoUri, context, isReel = true)
+                        api.createPost(body.ifBlank { "vibees" }, tag, videoUri, context, isReel = true)
                         api.reels(0, 20)
                     }.onSuccess { rows ->
                         posts = rows.filter { it.contentKind == "reel" && it.videoUrl.isNotBlank() }
