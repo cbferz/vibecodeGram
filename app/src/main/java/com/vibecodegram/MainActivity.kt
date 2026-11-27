@@ -643,7 +643,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Нет соединения с сервером."
                     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
                     PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> "Формат видео не поддерживается."
-                    else -> "Не удалось загрузить видео (\${error.errorCodeName})."
+                    else -> "Не удалось загрузить видео (${error.errorCodeName})."
                 }
             }
         }
@@ -672,12 +672,11 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             Box(
                 Modifier.fillMaxWidth().fillMaxHeight(.88f)
                     .clip(RoundedCornerShape(24.dp))
-                    .layerBackdrop(storyBackdrop)
                     .background(Color.Black)
             ) {
                 if (isVideo) {
                     AndroidView(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop),
                         factory = { ctx ->
                             PlayerView(ctx).apply {
                                 this.player = storyPlayer
@@ -717,7 +716,7 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
                         }
                     }
                 } else if (bitmap != null) {
-                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize().layerBackdrop(storyBackdrop), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = theme.accent)
