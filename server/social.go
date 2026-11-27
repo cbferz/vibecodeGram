@@ -100,20 +100,76 @@ func (a *App) createStory(w http.ResponseWriter,r *http.Request) {
     writeJSON(w,201,map[string]any{"id":id,"author_id":uid(r),"caption":caption,"media_type":mime,"media_size":len(data),"created_at":created,"expires_at":expires,"media_url":"/v1/stories/"+strconv.FormatInt(id,10)+"/media"})
 }
 
+type storyMediaReader struct {
+    db *sql.DB
+    ctx context.Context
+    storyID int64
+    userID int64
+    size int64
+    offset int64
+    buffer []byte
+    bufferStart int64
+}
+
+func (v *storyMediaReader) Read(p []byte) (int, error) {
+    if v.offset >= v.size { return 0, io.EOF }
+    if v.offset < v.bufferStart || v.offset >= v.bufferStart+int64(len(v.buffer)) {
+        const chunkSize int64 = 1024 * 1024
+        start := (v.offset / chunkSize) * chunkSize
+        length := chunkSize
+        if remaining := v.size - start; remaining < length { length = remaining }
+        var chunk []byte
+        err := v.db.QueryRowContext(v.ctx, \`SELECT substring(s.data from $2::integer for $3::integer)
+            FROM stories s
+            WHERE s.id=$1 AND s.expires_at>NOW()
+              AND (s.author_id=$4 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$4 AND f.followed_id=s.author_id))
+              AND NOT EXISTS(SELECT 1 FROM user_blocks b
+                WHERE (b.blocker_id=$4 AND b.blocked_id=s.author_id)
+                   OR (b.blocker_id=s.author_id AND b.blocked_id=$4))\`,
+            v.storyID, start+1, length, v.userID).Scan(&chunk)
+        if err != nil { return 0, err }
+        if len(chunk) == 0 { return 0, io.EOF }
+        v.buffer = chunk
+        v.bufferStart = start
+    }
+    available := int64(len(v.buffer)) - (v.offset - v.bufferStart)
+    n := len(p)
+    if int64(n) > available { n = int(available) }
+    copy(p[:n], v.buffer[v.offset-v.bufferStart:v.offset-v.bufferStart+int64(n)])
+    v.offset += int64(n)
+    return n, nil
+}
+
+func (v *storyMediaReader) Seek(offset int64, whence int) (int64, error) {
+    var next int64
+    switch whence {
+    case io.SeekStart: next = offset
+    case io.SeekCurrent: next = v.offset + offset
+    case io.SeekEnd: next = v.size + offset
+    default: return v.offset, errors.New("invalid story media seek mode")
+    }
+    if next < 0 { return v.offset, errors.New("negative story media seek") }
+    v.offset = next
+    return next, nil
+}
+
 func (a *App) getStoryMedia(w http.ResponseWriter,r *http.Request) {
     id,ok:=socialID(r); if !ok { fail(w,400,"invalid story id"); return }
     var mime string
-    var data []byte
-    err:=a.db.QueryRowContext(r.Context(),`SELECT s.media_type,s.data FROM stories s
+    var size int64
+    err:=a.db.QueryRowContext(r.Context(),\`SELECT s.media_type,s.media_size FROM stories s
         WHERE s.id=$1 AND s.expires_at>NOW()
         AND (s.author_id=$2 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followed_id=s.author_id))
-        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$2))`,id,uid(r)).Scan(&mime,&data)
+        AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=$2 AND b.blocked_id=s.author_id) OR (b.blocker_id=s.author_id AND b.blocked_id=$2))\`,id,uid(r)).Scan(&mime,&size)
     if errors.Is(err,sql.ErrNoRows) { fail(w,404,"story not found"); return }
     if err!=nil { fail(w,500,"could not load story"); return }
+    if size < 0 { fail(w,500,"invalid story media size"); return }
     w.Header().Set("Content-Type",mime)
     w.Header().Set("Cache-Control","private, max-age=60")
-    w.WriteHeader(http.StatusOK)
-    _,_=w.Write(data)
+    w.Header().Set("Accept-Ranges","bytes")
+    w.Header().Set("X-Content-Type-Options","nosniff")
+    reader:=&storyMediaReader{db:a.db,ctx:r.Context(),storyID:id,userID:uid(r),size:size}
+    http.ServeContent(w,r,"story-media",time.Time{},reader)
 }
 
 func (a *App) viewStory(w http.ResponseWriter,r *http.Request) {
