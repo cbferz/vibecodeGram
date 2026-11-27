@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.VideoView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -601,13 +602,25 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
     var deleteBusy by remember { mutableStateOf(false) }
     var overflowExpanded by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var playerError by remember(story.id) { mutableStateOf<String?>(null) }
+    var isBuffering by remember(story.id) { mutableStateOf(story.mediaType == "video/mp4") }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val storyBackdrop = rememberLayerBackdrop()
     val mediaUrl = BuildConfig.API_BASE_URL.trimEnd('/') + story.mediaUrl
+    val isVideo = story.mediaType.equals("video/mp4", ignoreCase = true)
+    val storyPlayer = remember(story.id, api.token) {
+        createMedia3Player(context, api.token).apply {
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 1f
+        }
+    }
     val bitmap by produceState<Bitmap?>(initialValue = null, story.id, story.mediaType) {
         if (story.mediaType.startsWith("image/")) {
             value = withContext(Dispatchers.IO) {
                 val connection = (URL(mediaUrl).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000; readTimeout = 20000
+                    connectTimeout = 12000
+                    readTimeout = 20000
                     api.token?.let { setRequestProperty("Authorization", "Bearer $it") }
                 }
                 try {
@@ -616,64 +629,150 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
             }
         }
     }
+
+    DisposableEffect(storyPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == Player.STATE_BUFFERING
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                isBuffering = false
+                playerError = when (error.errorCode) {
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "Сервер отклонил запрос видео."
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Нет соединения с сервером."
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> "Формат видео не поддерживается."
+                    else -> "Не удалось загрузить видео (\${error.errorCodeName})."
+                }
+            }
+        }
+        storyPlayer.addListener(listener)
+        onDispose {
+            storyPlayer.removeListener(listener)
+            storyPlayer.release()
+        }
+    }
+
+    LaunchedEffect(story.id, mediaUrl, isVideo) {
+        if (isVideo) {
+            playerError = null
+            isBuffering = true
+            storyPlayer.setMediaItem(MediaItem.fromUri(mediaUrl))
+            storyPlayer.prepare()
+            storyPlayer.playWhenReady = true
+        } else {
+            storyPlayer.pause()
+            storyPlayer.clearMediaItems()
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
-        Box(Modifier.fillMaxWidth().fillMaxHeight(.88f).clip(RoundedCornerShape(24.dp)).background(Color.Black)) {
-            if (story.mediaType == "video/mp4") {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx -> VideoView(ctx).apply {
-                        setVideoURI(Uri.parse(mediaUrl), mapOf("Authorization" to "Bearer ${api.token.orEmpty()}"))
-                        setOnPreparedListener { it.isLooping = true; start() }
-                    } }
-                )
-            } else if (bitmap != null) {
-                Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = theme.accent) }
-            }
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(start = 14.dp, top = 16.dp, end = 116.dp, bottom = 14.dp)) {
-                Text("@${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
-                if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
-            }
-            Row(
-                Modifier.align(Alignment.TopEnd).padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        CompositionLocalProvider(LocalLiquidGlassBackdrop provides storyBackdrop) {
+            Box(
+                Modifier.fillMaxWidth().fillMaxHeight(.88f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black)
+                    .layerBackdrop(storyBackdrop)
             ) {
-                if (story.authorId == currentUserId) {
-                    Box {
-                        Box(
-                            Modifier.size(42.dp).liquidGlass(theme, CircleShape, .96f)
-                                .clickable(enabled = !deleteBusy) { overflowExpanded = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (deleteBusy) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp, color = Color.White)
-                            else Icon(Icons.Default.MoreVert, "Дополнительные действия", tint = Color.White, modifier = Modifier.size(21.dp))
-                        }
-                        DropdownMenu(
-                            expanded = overflowExpanded,
-                            onDismissRequest = { overflowExpanded = false },
-                            modifier = Modifier.liquidGlass(theme, RoundedCornerShape(16.dp), .98f),
-                            containerColor = Color.Transparent
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Удалить историю", color = Color(0xFFFF8294)) },
-                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF8294)) },
-                                enabled = !deleteBusy,
-                                onClick = {
-                                    overflowExpanded = false
-                                    confirmDelete = true
-                                }
-                            )
+                if (isVideo) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                this.player = storyPlayer
+                                useController = false
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                                setKeepContentOnPlayerReset(true)
+                            }
+                        },
+                        update = { view ->
+                            if (view.player !== storyPlayer) view.player = storyPlayer
+                        },
+                        onRelease = { view -> view.player = null }
+                    )
+                    if (isBuffering && playerError == null) {
+                        Box(Modifier.align(Alignment.Center).size(54.dp).liquidGlass(theme, CircleShape, .9f), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(25.dp), color = Color.White, strokeWidth = 2.dp)
                         }
                     }
+                    playerError?.let { message ->
+                        Column(
+                            Modifier.align(Alignment.Center).padding(24.dp)
+                                .liquidGlass(theme, RoundedCornerShape(20.dp), .98f)
+                                .padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.CloudOff, null, tint = Color.White, modifier = Modifier.size(30.dp))
+                            Text(message, color = Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            TextButton(onClick = {
+                                playerError = null
+                                isBuffering = true
+                                storyPlayer.seekTo(0)
+                                storyPlayer.prepare()
+                                storyPlayer.playWhenReady = true
+                            }) { Text("Повторить", color = theme.accent) }
+                        }
+                    }
+                } else if (bitmap != null) {
+                    Image(bitmap!!.asImageBitmap(), contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = theme.accent)
+                    }
                 }
-                Box(
-                    Modifier.size(42.dp).liquidGlass(theme, CircleShape, .96f)
-                        .clickable { onDismiss() },
-                    contentAlignment = Alignment.Center
+
+                Column(
+                    Modifier.align(Alignment.TopStart).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .64f), Color.Black.copy(alpha = .12f), Color.Transparent)))
+                        .padding(start = 14.dp, top = 16.dp, end = 116.dp, bottom = 22.dp)
                 ) {
-                    Icon(Icons.Default.Close, "Закрыть историю", tint = Color.White, modifier = Modifier.size(21.dp))
+                    Text("@\${story.username}", color = Color.White, fontWeight = FontWeight.Bold)
+                    if (story.caption.isNotBlank()) Text(story.caption, color = Color.White, fontSize = 13.sp)
+                }
+
+                Row(
+                    Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (story.authorId == currentUserId) {
+                        Box {
+                            Box(
+                                Modifier.size(44.dp).liquidGlass(theme, CircleShape, 1f)
+                                    .clickable(enabled = !deleteBusy) { overflowExpanded = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (deleteBusy) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp, color = Color.White)
+                                else Icon(Icons.Default.MoreVert, "Дополнительные действия", tint = Color.White, modifier = Modifier.size(21.dp))
+                            }
+                            DropdownMenu(
+                                expanded = overflowExpanded,
+                                onDismissRequest = { overflowExpanded = false },
+                                modifier = Modifier.liquidGlass(theme, RoundedCornerShape(16.dp), .98f),
+                                containerColor = Color.Transparent
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Удалить историю", color = Color(0xFFFF8294)) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF8294)) },
+                                    enabled = !deleteBusy,
+                                    onClick = {
+                                        overflowExpanded = false
+                                        confirmDelete = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box(
+                        Modifier.size(44.dp).liquidGlass(theme, CircleShape, 1f)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Close, "Закрыть историю", tint = Color.White, modifier = Modifier.size(21.dp))
+                    }
                 }
             }
         }
@@ -702,7 +801,6 @@ private fun StoryViewerDialog(story: ApiStory, theme: Palette, api: ApiClient, c
         )
     }
 }
-
 @Composable
 private fun SearchScreen(theme: Palette, api: ApiClient, onOpenChat: (Chat) -> Unit) {
     var query by remember { mutableStateOf("") }
